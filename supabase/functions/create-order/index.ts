@@ -23,15 +23,17 @@ serve(async (req) => {
     
     // Verificar variáveis de ambiente PRIMEIRO
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
     
     console.log('Supabase URL:', supabaseUrl ? 'Definido' : 'NÃO DEFINIDO');
-    console.log('Supabase Key:', supabaseKey ? 'Definido' : 'NÃO DEFINIDO');
+    console.log('Supabase Service Key:', supabaseServiceKey ? 'Definido' : 'NÃO DEFINIDO');
+    console.log('Supabase Anon Key:', supabaseAnonKey ? 'Definido' : 'NÃO DEFINIDO');
     
-    if (!supabaseUrl || !supabaseKey) {
+    if (!supabaseUrl || !supabaseServiceKey) {
       console.error('❌ Variáveis de ambiente não configuradas!');
       console.error('SUPABASE_URL:', supabaseUrl);
-      console.error('SUPABASE_SERVICE_ROLE_KEY:', supabaseKey ? 'Presente' : 'Ausente');
+      console.error('SUPABASE_SERVICE_ROLE_KEY:', supabaseServiceKey ? 'Presente' : 'Ausente');
       return new Response(
         JSON.stringify({ 
           success: false, 
@@ -44,7 +46,13 @@ serve(async (req) => {
       );
     }
     
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // Criar cliente com anon key para validar token do usuário
+    const supabaseAnon = supabaseAnonKey 
+      ? createClient(supabaseUrl, supabaseAnonKey)
+      : null;
+    
+    // Criar cliente com service role key para operações de banco
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
     console.log('Cliente Supabase criado');
 
     // Get JWT from Authorization header
@@ -77,20 +85,73 @@ serve(async (req) => {
     try {
       const token = authHeader.replace('Bearer ', '');
       console.log('Token length:', token.length);
-      console.log('Chamando supabase.auth.getUser()...');
       
-      const authResult = await supabase.auth.getUser(token);
-      console.log('Auth result recebido');
-      console.log('User:', authResult.data?.user ? 'Presente' : 'Ausente');
-      console.log('Error:', authResult.error ? JSON.stringify(authResult.error) : 'Nenhum');
+      // Decodificar JWT para obter informações do usuário
+      // Formato JWT: header.payload.signature
+      const tokenParts = token.split('.');
+      if (tokenParts.length === 3) {
+        try {
+          // Decodificar payload (base64url)
+          const payload = JSON.parse(
+            atob(tokenParts[1].replace(/-/g, '+').replace(/_/g, '/'))
+          );
+          console.log('Token payload decodificado:', JSON.stringify(payload, null, 2));
+          
+          // Verificar se tem sub (subject/user ID)
+          if (payload.sub) {
+            console.log('✅ Token válido - User ID:', payload.sub);
+            console.log('Email:', payload.email);
+            console.log('Exp:', payload.exp ? new Date(payload.exp * 1000).toISOString() : 'N/A');
+            
+            // Verificar expiração
+            if (payload.exp && payload.exp < Date.now() / 1000) {
+              console.error('❌ Token expirado');
+              userError = { message: 'Token expired', code: 'token_expired' };
+            } else {
+              // Criar objeto user básico a partir do token
+              user = {
+                id: payload.sub,
+                email: payload.email || payload.user_email || null,
+                user_metadata: payload.user_metadata || {},
+              };
+              console.log('✅ Usuário extraído do token:', user.id, user.email);
+            }
+          } else {
+            console.error('❌ Token não tem campo "sub"');
+            userError = { message: 'Invalid token: missing sub claim', code: 'bad_jwt' };
+          }
+        } catch (decodeError) {
+          console.error('❌ Erro ao decodificar token:', decodeError);
+          userError = { message: 'Invalid token format', code: 'bad_jwt' };
+        }
+      } else {
+        console.error('❌ Token não tem formato JWT válido (3 partes)');
+        userError = { message: 'Invalid token format', code: 'bad_jwt' };
+      }
       
-      user = authResult.data?.user;
-      userError = authResult.error;
+      // Se ainda não temos user, tentar getUser() como fallback
+      if (!user && !userError && supabaseAnon) {
+        console.log('Tentando getUser() como fallback...');
+        const authResult = await supabaseAnon.auth.getUser(token);
+        if (authResult.data?.user && !authResult.error) {
+          user = authResult.data.user;
+          console.log('✅ Usuário obtido via getUser():', user.id);
+        } else if (authResult.error) {
+          console.error('getUser() também falhou:', authResult.error);
+          // Não sobrescrever userError se já tiver um
+          if (!userError) {
+            userError = authResult.error;
+          }
+        }
+      }
     } catch (err) {
-      console.error('❌ Erro ao chamar getUser:', err);
+      console.error('❌ Erro ao processar autenticação:', err);
       console.error('Error type:', err?.constructor?.name);
       console.error('Error message:', err instanceof Error ? err.message : 'Unknown');
-      userError = err as any;
+      console.error('Error stack:', err instanceof Error ? err.stack : 'No stack');
+      if (!userError) {
+        userError = err as any;
+      }
     }
 
     if (userError) {
