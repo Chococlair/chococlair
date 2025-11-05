@@ -93,80 +93,81 @@ const Checkout = () => {
       console.log('Payment method:', paymentMethod);
       console.log('Payment method type:', typeof paymentMethod);
 
-      // Call secure Edge Function
+      // Call secure Edge Function usando fetch diretamente para ter mais controle
       console.log('📤 Chamando Edge Function...');
       
       try {
-        const response = await supabase.functions.invoke('create-order', {
-          body: orderData,
+        // Obter a sessão atual
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          throw new Error('Sessão expirada. Por favor, faça login novamente.');
+        }
+
+        // Chamar Edge Function diretamente com fetch para ter acesso ao body
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+        const functionUrl = `${supabaseUrl}/functions/v1/create-order`;
+        
+        console.log('Function URL:', functionUrl);
+        console.log('Using session token:', session.access_token ? 'Presente' : 'Ausente');
+        
+        const fetchResponse = await fetch(functionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+            'apikey': supabaseKey || '',
+          },
+          body: JSON.stringify(orderData),
         });
 
-        console.log('📥 Full response:', response);
-        console.log('Response error:', response.error);
-        console.log('Response data:', response.data);
-
-        // Se houver erro, tentar ler o body da resposta HTTP diretamente
-        if (response.error) {
-          console.error('❌ ERROR creating order:', response.error);
-          console.error('Error context:', response.error.context);
+        console.log('📥 Fetch response status:', fetchResponse.status);
+        console.log('📥 Fetch response ok:', fetchResponse.ok);
+        
+        // Ler o body da resposta
+        let responseBody = '';
+        let responseData = null;
+        
+        try {
+          responseBody = await fetchResponse.text();
+          console.log('📄 Response body (raw):', responseBody);
           
-          // Tentar ler o body da resposta HTTP diretamente
-          let errorMessage = 'Erro ao criar pedido';
-          
-          try {
-            // Tentar ler o response se disponível
-            if (response.error.context?.response) {
-              const responseClone = response.error.context.response.clone();
-              const responseBody = await responseClone.text();
-              console.log('📄 Response body from error:', responseBody);
-              try {
-                const parsedBody = JSON.parse(responseBody);
-                if (parsedBody.error) {
-                  errorMessage = parsedBody.error;
-                  console.log('✅ Error message from body:', errorMessage);
-                }
-              } catch (e) {
-                console.error('Error parsing response body:', e);
-                // Se não conseguir parsear, usar o texto como erro
-                if (responseBody) {
-                  errorMessage = responseBody;
-                }
-              }
+          if (responseBody) {
+            try {
+              responseData = JSON.parse(responseBody);
+              console.log('📄 Response data (parsed):', responseData);
+            } catch (e) {
+              console.error('Error parsing response body as JSON:', e);
             }
-          } catch (e) {
-            console.error('Error reading response body:', e);
           }
-          
-          // Fallback para outras fontes de erro
-          if (response.data && typeof response.data === 'object' && 'error' in response.data) {
-            errorMessage = response.data.error;
-            console.log('✅ Error from response.data:', errorMessage);
-          } else if (response.error.message) {
-            errorMessage = response.error.message;
-            console.log('✅ Error from response.error.message:', errorMessage);
-          }
-          
-          console.error('🚨 Final error message:', errorMessage);
+        } catch (e) {
+          console.error('Error reading response body:', e);
+        }
+
+        // Se não for sucesso, tratar como erro
+        if (!fetchResponse.ok) {
+          const errorMessage = responseData?.error || responseBody || `Erro ${fetchResponse.status}: ${fetchResponse.statusText}`;
+          console.error('❌ ERROR creating order:', errorMessage);
+          console.error('Status:', fetchResponse.status);
+          console.error('Response data:', responseData);
           throw new Error(errorMessage);
         }
 
-        const data = response.data;
-
-        if (!data || !data.success) {
-          const errorMsg = data?.error || 'Erro ao criar pedido';
+        // Se chegou aqui, foi sucesso
+        if (!responseData || !responseData.success) {
+          const errorMsg = responseData?.error || 'Erro ao criar pedido';
           console.error('Order creation failed:', errorMsg);
-          console.error('Response data:', JSON.stringify(data, null, 2));
           throw new Error(errorMsg);
         }
 
-        console.log('Order created successfully:', data);
+        console.log('Order created successfully:', responseData);
 
         // Clear cart
         clearCart();
 
         toast.success("Pedido realizado com sucesso!");
         // Redirecionar para página de acompanhamento
-        navigate(`/pedido/${data.orderId}`);
+        navigate(`/pedido/${responseData.orderId}`);
       } catch (error: any) {
         console.error('Checkout error:', error);
         toast.error(error.message || "Erro ao finalizar pedido");
