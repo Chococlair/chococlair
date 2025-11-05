@@ -150,13 +150,23 @@ serve(async (req) => {
     const total = subtotal + deliveryFee;
 
     console.log('Order totals - Subtotal:', subtotal, 'Delivery:', deliveryFee, 'Total:', total);
+    console.log('Payment method received:', customerData.paymentMethod);
 
     // Validate payment method
     const validPaymentMethods = ['stripe', 'dinheiro', 'mbway'];
     const paymentMethod = customerData.paymentMethod;
-    if (!validPaymentMethods.includes(paymentMethod)) {
-      throw new Error(`Invalid payment method: ${paymentMethod}`);
+    
+    if (!paymentMethod) {
+      throw new Error('Payment method is required');
     }
+    
+    if (!validPaymentMethods.includes(paymentMethod)) {
+      console.error(`Invalid payment method received: ${paymentMethod}`);
+      console.error(`Valid methods are: ${validPaymentMethods.join(', ')}`);
+      throw new Error(`Invalid payment method: ${paymentMethod}. Valid methods are: ${validPaymentMethods.join(', ')}`);
+    }
+
+    console.log('Creating order with payment method:', paymentMethod);
 
     // Create order in transaction
     const { data: order, error: orderError } = await supabase

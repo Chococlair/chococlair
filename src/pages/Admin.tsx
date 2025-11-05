@@ -92,6 +92,9 @@ const Admin = () => {
   useEffect(() => {
     if (!isAdmin) return;
 
+    let currentOrdersCount = 0;
+    let channel: any = null;
+
     // Função para tocar notificação sonora
     const playNotificationSound = () => {
       try {
@@ -117,72 +120,69 @@ const Admin = () => {
       }
     };
 
-    let currentOrdersCount = 0;
-
     // Carregar pedidos inicialmente
     loadOrders().then((loadedOrders) => {
       currentOrdersCount = loadedOrders.length;
       setPreviousOrdersCount(loadedOrders.length);
-    });
 
-    // Configurar subscription para mudanças na tabela orders
-    const channel = supabase
-      .channel('orders_changes', {
-        config: {
-          broadcast: { self: true },
-        },
-      })
-      .on(
-        'postgres_changes',
-        {
-          event: '*', // Escutar todos os eventos (INSERT, UPDATE, DELETE)
-          schema: 'public',
-          table: 'orders',
-        },
-        async (payload) => {
-          console.log('Order change detected:', payload);
-          
-          // Recarregar pedidos
-          const updatedOrders = await loadOrders();
-          
-          // Se for um INSERT (novo pedido), tocar som e mostrar notificação
-          if (payload.eventType === 'INSERT') {
-            const newOrder = payload.new as Order;
+      // Configurar subscription para mudanças na tabela orders
+      channel = supabase
+        .channel('orders_changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*', // Escutar todos os eventos (INSERT, UPDATE, DELETE)
+            schema: 'public',
+            table: 'orders',
+          },
+          async (payload: any) => {
+            console.log('Order change detected:', payload);
             
-            // Comparar contagem para garantir que é realmente um novo pedido
-            if (updatedOrders.length > currentOrdersCount) {
-              currentOrdersCount = updatedOrders.length;
+            // Recarregar pedidos
+            const updatedOrders = await loadOrders();
+            
+            // Se for um INSERT (novo pedido), tocar som e mostrar notificação
+            if (payload.eventType === 'INSERT') {
+              const newOrder = payload.new as Order;
               
-              // Tocar som e mostrar notificação
-              setTimeout(() => {
-                playNotificationSound();
-                toast.success(`Novo pedido recebido!`, {
-                  description: `Pedido #${newOrder.id.slice(0, 8).toUpperCase()} - ${newOrder.customer_name} - ${newOrder.total.toFixed(2)}€`,
-                  duration: 5000,
-                });
-              }, 300);
+              // Comparar contagem para garantir que é realmente um novo pedido
+              if (updatedOrders.length > currentOrdersCount) {
+                currentOrdersCount = updatedOrders.length;
+                
+                // Tocar som e mostrar notificação
+                setTimeout(() => {
+                  playNotificationSound();
+                  toast.success(`Novo pedido recebido!`, {
+                    description: `Pedido #${newOrder.id.slice(0, 8).toUpperCase()} - ${newOrder.customer_name} - ${newOrder.total.toFixed(2)}€`,
+                    duration: 5000,
+                  });
+                }, 300);
+              }
+            } else if (payload.eventType === 'UPDATE') {
+              // Atualizar contagem também para UPDATEs
+              currentOrdersCount = updatedOrders.length;
+            } else if (payload.eventType === 'DELETE') {
+              // Atualizar contagem para DELETEs
+              currentOrdersCount = updatedOrders.length;
             }
-          } else if (payload.eventType === 'UPDATE') {
-            // Atualizar contagem também para UPDATEs
-            currentOrdersCount = updatedOrders.length;
-          } else if (payload.eventType === 'DELETE') {
-            // Atualizar contagem para DELETEs
-            currentOrdersCount = updatedOrders.length;
           }
-        }
-      )
-      .subscribe((status) => {
-        console.log('Realtime subscription status:', status);
-        if (status === 'SUBSCRIBED') {
-          console.log('Successfully subscribed to orders changes');
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('Error subscribing to orders changes');
-        }
-      });
+        )
+        .subscribe((status: string) => {
+          console.log('Realtime subscription status:', status);
+          if (status === 'SUBSCRIBED') {
+            console.log('✅ Successfully subscribed to orders changes');
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            console.error('❌ Error subscribing to orders changes:', status);
+            toast.error('Erro na conexão em tempo real. Recarregue a página.');
+          }
+        });
+    });
 
     // Cleanup subscription ao desmontar
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
   }, [isAdmin]);
 
@@ -262,31 +262,27 @@ const Admin = () => {
 
     setDeleteLoading(true);
     try {
-      // Deletar os itens do pedido primeiro (devido ao CASCADE, isso é automático, mas vamos fazer explicitamente)
-      const { error: itemsError } = await supabase
-        .from('order_items')
-        .delete()
-        .eq('order_id', orderToDelete.id);
+      console.log('Deleting order:', orderToDelete.id);
 
-      if (itemsError) {
-        console.error('Error deleting order items:', itemsError);
-        // Continua mesmo se houver erro (pode ser que já não existam)
-      }
-
-      // Deletar o pedido
+      // Deletar o pedido (o CASCADE vai deletar os itens automaticamente)
       const { error: orderError } = await supabase
         .from('orders')
         .delete()
         .eq('id', orderToDelete.id);
 
-      if (orderError) throw orderError;
+      if (orderError) {
+        console.error('Error deleting order:', orderError);
+        console.error('Error details:', JSON.stringify(orderError, null, 2));
+        throw new Error(`Erro ao excluir pedido: ${orderError.message || JSON.stringify(orderError)}`);
+      }
 
       toast.success("Pedido excluído com sucesso");
       setOrderToDelete(null);
       await loadOrders();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting order:', error);
-      toast.error("Erro ao excluir pedido");
+      const errorMessage = error?.message || "Erro ao excluir pedido. Verifique se você tem permissão.";
+      toast.error(errorMessage);
     } finally {
       setDeleteLoading(false);
     }
