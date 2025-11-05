@@ -90,38 +90,31 @@ const Checkout = () => {
       };
 
       console.log('Submitting order:', orderData);
+      console.log('Payment method:', paymentMethod);
 
       // Call secure Edge Function
-      const { data, error } = await supabase.functions.invoke('create-order', {
+      const response = await supabase.functions.invoke('create-order', {
         body: orderData,
       });
 
-      if (error) {
-        console.error('Error creating order:', error);
-        console.error('Error details:', JSON.stringify(error, null, 2));
+      console.log('Full response:', response);
+
+      if (response.error) {
+        console.error('Error creating order:', response.error);
+        console.error('Error details:', JSON.stringify(response.error, null, 2));
         
-        // Try to get error message from response
-        let errorMessage = error.message || 'Erro ao criar pedido';
-        if (error.context?.msg) {
-          errorMessage = error.context.msg;
-        }
+        // Try to get error message from response body
+        let errorMessage = response.error.message || 'Erro ao criar pedido';
         
-        // Se houver data no erro, tentar pegar a mensagem de lá
-        if (error.context?.body) {
-          try {
-            const errorBody = typeof error.context.body === 'string' 
-              ? JSON.parse(error.context.body) 
-              : error.context.body;
-            if (errorBody.error) {
-              errorMessage = errorBody.error;
-            }
-          } catch (e) {
-            // Ignorar erro de parsing
-          }
+        // Se houver response.data, pode conter o erro
+        if (response.data && response.data.error) {
+          errorMessage = response.data.error;
         }
         
         throw new Error(errorMessage);
       }
+
+      const data = response.data;
 
       if (!data || !data.success) {
         const errorMsg = data?.error || 'Erro ao criar pedido';

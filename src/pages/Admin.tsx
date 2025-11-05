@@ -120,63 +120,69 @@ const Admin = () => {
       }
     };
 
-    // Carregar pedidos inicialmente
+    // Carregar pedidos primeiro
     loadOrders().then((loadedOrders) => {
       currentOrdersCount = loadedOrders.length;
       setPreviousOrdersCount(loadedOrders.length);
-
-      // Configurar subscription para mudanças na tabela orders
-      channel = supabase
-        .channel('orders_changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*', // Escutar todos os eventos (INSERT, UPDATE, DELETE)
-            schema: 'public',
-            table: 'orders',
-          },
-          async (payload: any) => {
-            console.log('Order change detected:', payload);
-            
-            // Recarregar pedidos
-            const updatedOrders = await loadOrders();
-            
-            // Se for um INSERT (novo pedido), tocar som e mostrar notificação
-            if (payload.eventType === 'INSERT') {
-              const newOrder = payload.new as Order;
-              
-              // Comparar contagem para garantir que é realmente um novo pedido
-              if (updatedOrders.length > currentOrdersCount) {
-                currentOrdersCount = updatedOrders.length;
-                
-                // Tocar som e mostrar notificação
-                setTimeout(() => {
-                  playNotificationSound();
-                  toast.success(`Novo pedido recebido!`, {
-                    description: `Pedido #${newOrder.id.slice(0, 8).toUpperCase()} - ${newOrder.customer_name} - ${newOrder.total.toFixed(2)}€`,
-                    duration: 5000,
-                  });
-                }, 300);
-              }
-            } else if (payload.eventType === 'UPDATE') {
-              // Atualizar contagem também para UPDATEs
-              currentOrdersCount = updatedOrders.length;
-            } else if (payload.eventType === 'DELETE') {
-              // Atualizar contagem para DELETEs
-              currentOrdersCount = updatedOrders.length;
-            }
-          }
-        )
-        .subscribe((status: string) => {
-          console.log('Realtime subscription status:', status);
-          if (status === 'SUBSCRIBED') {
-            console.log('✅ Successfully subscribed to orders changes');
-          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-            console.error('❌ Error subscribing to orders changes:', status);
-            toast.error('Erro na conexão em tempo real. Recarregue a página.');
-          }
-        });
     });
+
+    // Configurar subscription para mudanças na tabela orders
+    channel = supabase
+      .channel(`orders_changes_${Date.now()}`) // Nome único para evitar conflitos
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Escutar todos os eventos (INSERT, UPDATE, DELETE)
+          schema: 'public',
+          table: 'orders',
+        },
+        async (payload: any) => {
+          console.log('🔔 Order change detected:', payload);
+          console.log('Event type:', payload.eventType);
+          console.log('New data:', payload.new);
+          console.log('Old data:', payload.old);
+          
+          // Recarregar pedidos
+          const updatedOrders = await loadOrders();
+          
+          // Se for um INSERT (novo pedido), tocar som e mostrar notificação
+          if (payload.eventType === 'INSERT') {
+            const newOrder = payload.new as Order;
+            console.log('🆕 New order received:', newOrder);
+            
+            // Comparar contagem para garantir que é realmente um novo pedido
+            if (updatedOrders.length > currentOrdersCount) {
+              currentOrdersCount = updatedOrders.length;
+              
+              // Tocar som e mostrar notificação
+              setTimeout(() => {
+                playNotificationSound();
+                toast.success(`Novo pedido recebido!`, {
+                  description: `Pedido #${newOrder.id.slice(0, 8).toUpperCase()} - ${newOrder.customer_name} - ${newOrder.total.toFixed(2)}€`,
+                  duration: 5000,
+                });
+              }, 300);
+            }
+          } else if (payload.eventType === 'UPDATE') {
+            console.log('🔄 Order updated');
+            currentOrdersCount = updatedOrders.length;
+          } else if (payload.eventType === 'DELETE') {
+            console.log('🗑️ Order deleted');
+            currentOrdersCount = updatedOrders.length;
+          }
+        }
+      )
+      .subscribe((status: string) => {
+        console.log('📡 Realtime subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Successfully subscribed to orders changes');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.error('❌ Error subscribing to orders changes:', status);
+          toast.error('Erro na conexão em tempo real. Recarregue a página.');
+        } else {
+          console.log('⏳ Subscription status:', status);
+        }
+      });
 
     // Cleanup subscription ao desmontar
     return () => {
@@ -265,16 +271,32 @@ const Admin = () => {
       console.log('Deleting order:', orderToDelete.id);
 
       // Deletar o pedido (o CASCADE vai deletar os itens automaticamente)
-      const { error: orderError } = await supabase
+      const { data: deletedData, error: orderError } = await supabase
         .from('orders')
         .delete()
-        .eq('id', orderToDelete.id);
+        .eq('id', orderToDelete.id)
+        .select();
 
       if (orderError) {
-        console.error('Error deleting order:', orderError);
+        console.error('❌ Error deleting order:', orderError);
+        console.error('Error code:', orderError.code);
+        console.error('Error message:', orderError.message);
         console.error('Error details:', JSON.stringify(orderError, null, 2));
-        throw new Error(`Erro ao excluir pedido: ${orderError.message || JSON.stringify(orderError)}`);
+        
+        // Verificar se é erro de permissão
+        if (orderError.code === '42501' || orderError.message?.includes('permission')) {
+          throw new Error('Você não tem permissão para deletar pedidos. Verifique se você é admin.');
+        }
+        
+        throw new Error(`Erro ao excluir pedido: ${orderError.message || 'Erro desconhecido'}`);
       }
+
+      if (!deletedData || deletedData.length === 0) {
+        console.warn('⚠️ Nenhum pedido foi deletado. Verifique se o pedido existe e se você tem permissão.');
+        throw new Error('Nenhum pedido foi deletado. Verifique se você tem permissão de admin.');
+      }
+
+      console.log('✅ Order deleted successfully:', deletedData);
 
       toast.success("Pedido excluído com sucesso");
       setOrderToDelete(null);
