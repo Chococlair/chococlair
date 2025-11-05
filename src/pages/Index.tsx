@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Heart, Award, Clock } from "lucide-react";
+import { ArrowRight, Heart, Award, Clock, Phone } from "lucide-react";
 import { getCart, getCartItemsCount } from "@/lib/cart";
 
 const Index = () => {
@@ -33,10 +33,10 @@ const Index = () => {
                 <span className="font-leckerli text-6xl md:text-8xl text-primary leading-none">C</span>
                 <span className="font-aoboshi text-5xl md:text-7xl text-primary leading-none">hococlair</span>
               </h1>
-              <p className="text-xl md:text-2xl text-muted-foreground mb-8">
+              <p className="text-xl md:text-2xl text-foreground mb-8 font-medium">
                 Confeitaria Artesanal Premium
               </p>
-              <p className="text-lg text-foreground/80 mb-10 max-w-2xl mx-auto">
+              <p className="text-lg text-foreground mb-10 max-w-2xl mx-auto">
                 Delicie-se com os nossos éclairs artesanais, chocotones recheados e rocamboles cremosos. 
                 Cada criação é feita com ingredientes premium e muito amor.
               </p>
@@ -58,8 +58,8 @@ const Index = () => {
                 <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Heart className="h-8 w-8 text-primary" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Feito com Amor</h3>
-                <p className="text-muted-foreground">
+                <h3 className="font-semibold text-lg mb-2 text-foreground">Feito com Amor</h3>
+                <p className="text-foreground">
                   Cada produto é preparado artesanalmente com dedicação e carinho
                 </p>
               </div>
@@ -68,8 +68,8 @@ const Index = () => {
                 <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Award className="h-8 w-8 text-accent" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Ingredientes Premium</h3>
-                <p className="text-muted-foreground">
+                <h3 className="font-semibold text-lg mb-2 text-foreground">Ingredientes Premium</h3>
+                <p className="text-foreground">
                   Utilizamos apenas os melhores ingredientes para garantir qualidade máxima
                 </p>
               </div>
@@ -78,8 +78,8 @@ const Index = () => {
                 <div className="w-16 h-16 bg-secondary/10 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Clock className="h-8 w-8 text-secondary" />
                 </div>
-                <h3 className="font-semibold text-lg mb-2">Sempre Frescos</h3>
-                <p className="text-muted-foreground">
+                <h3 className="font-semibold text-lg mb-2 text-foreground">Sempre Frescos</h3>
+                <p className="text-foreground">
                   Produtos preparados diariamente para garantir o máximo de frescura
                 </p>
               </div>
@@ -91,12 +91,12 @@ const Index = () => {
         <section id="sobre" className="py-16 bg-secondary/10">
           <div className="container mx-auto px-4">
             <div className="max-w-3xl mx-auto text-center">
-              <h2 className="text-3xl md:text-4xl font-bold mb-6">Sobre a Chococlair</h2>
-              <p className="text-lg text-foreground/80 mb-6">
+              <h2 className="text-3xl md:text-4xl font-bold mb-6 text-foreground">Sobre a Chococlair</h2>
+              <p className="text-lg text-foreground mb-6">
                 A Chococlair nasceu da paixão pela confeitaria artesanal e pelo desejo de criar 
                 experiências únicas através de sabores extraordinários.
               </p>
-              <p className="text-lg text-foreground/80">
+              <p className="text-lg text-foreground">
                 Cada produto é cuidadosamente elaborado com ingredientes premium, 
                 combinando técnicas tradicionais com criatividade moderna para surpreender 
                 o seu paladar em cada mordida.
@@ -109,17 +109,24 @@ const Index = () => {
         <section id="contacto" className="py-16">
           <div className="container mx-auto px-4">
             <div className="max-w-2xl mx-auto text-center">
-              <h2 className="text-3xl md:text-4xl font-bold mb-6">Entre em Contacto</h2>
-              <p className="text-lg text-muted-foreground mb-8">
+              <h2 className="text-3xl md:text-4xl font-bold mb-6 text-foreground">Entre em Contacto</h2>
+              <p className="text-lg text-foreground mb-8">
                 Tem alguma dúvida ou quer fazer uma encomenda especial? 
                 Estamos aqui para ajudar!
               </p>
               <div className="space-y-4">
                 <a 
                   href="mailto:chococlairpt@gmail.com"
-                  className="block text-lg text-primary hover:underline"
+                  className="block text-lg text-primary hover:underline font-medium"
                 >
                   chococlairpt@gmail.com
+                </a>
+                <a 
+                  href="tel:+351931662784"
+                  className="flex items-center justify-center gap-2 text-lg text-primary hover:underline font-medium"
+                >
+                  <Phone className="h-5 w-5" />
+                  +351 931 662 784
                 </a>
               </div>
             </div>

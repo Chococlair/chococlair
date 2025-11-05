@@ -10,6 +10,8 @@ import Carrinho from "./pages/Carrinho";
 import Auth from "./pages/Auth";
 import Checkout from "./pages/Checkout";
 import Admin from "./pages/Admin";
+import PedidoTracking from "./pages/PedidoTracking";
+import Perfil from "./pages/Perfil";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -27,6 +29,8 @@ const App = () => (
           <Route path="/carrinho" element={<Carrinho />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/checkout" element={<Checkout />} />
+          <Route path="/pedido/:orderId" element={<PedidoTracking />} />
+          <Route path="/perfil" element={<Perfil />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

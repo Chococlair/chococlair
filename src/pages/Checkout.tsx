@@ -75,6 +75,7 @@ const Checkout = () => {
         items: cart.map(item => ({
           productId: item.productId,
           quantity: item.quantity,
+          category: item.category,
           options: item.options || null,
         })),
         customerData: {
@@ -97,11 +98,18 @@ const Checkout = () => {
 
       if (error) {
         console.error('Error creating order:', error);
-        throw new Error(error.message || 'Erro ao criar pedido');
+        // Try to get error message from response
+        let errorMessage = error.message || 'Erro ao criar pedido';
+        if (error.context?.msg) {
+          errorMessage = error.context.msg;
+        }
+        throw new Error(errorMessage);
       }
 
-      if (!data.success) {
-        throw new Error(data.error || 'Erro ao criar pedido');
+      if (!data || !data.success) {
+        const errorMsg = data?.error || 'Erro ao criar pedido';
+        console.error('Order creation failed:', errorMsg);
+        throw new Error(errorMsg);
       }
 
       console.log('Order created successfully:', data);
@@ -110,7 +118,8 @@ const Checkout = () => {
       clearCart();
 
       toast.success("Pedido realizado com sucesso!");
-      navigate("/");
+      // Redirecionar para página de acompanhamento
+      navigate(`/pedido/${data.orderId}`);
     } catch (error: any) {
       console.error('Checkout error:', error);
       toast.error(error.message || "Erro ao finalizar pedido");

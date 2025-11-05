@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowLeft, ShoppingCart, Minus, Plus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { getCart, getCartItemsCount, addToCart } from "@/lib/cart";
@@ -24,10 +25,12 @@ const Produto = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [product, setProduct] = useState<Product | null>(null);
+  const [allEclairs, setAllEclairs] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [cartCount, setCartCount] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [boxSize, setBoxSize] = useState<string>("2");
+  const [selectedFlavors, setSelectedFlavors] = useState<string[]>([]);
   const [massType, setMassType] = useState<string>("chocolate");
 
   useEffect(() => {
@@ -43,6 +46,13 @@ const Produto = () => {
     window.addEventListener('cart-updated', handleCartUpdate);
     return () => window.removeEventListener('cart-updated', handleCartUpdate);
   }, [id]);
+
+  // Quando o tamanho da caixa muda, resetar sabores selecionados
+  useEffect(() => {
+    if (product?.category === 'eclair') {
+      setSelectedFlavors([]);
+    }
+  }, [boxSize, product?.category]);
 
   const loadProduct = async (productId: string) => {
     try {
@@ -61,12 +71,52 @@ const Produto = () => {
         return;
       }
       setProduct(data);
+
+      // Se for éclair, carregar todos os éclairs disponíveis
+      if (data.category === 'eclair') {
+        loadAllEclairs();
+      }
     } catch (error) {
       console.error('Erro ao carregar produto:', error);
       toast.error('Erro ao carregar produto');
       navigate('/produtos');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadAllEclairs = async () => {
+    try {
+      // @ts-ignore
+      const { data, error } = await supabase
+        // @ts-ignore
+        .from('products')
+        .select('*')
+        .eq('category', 'eclair')
+        .eq('available', true)
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      setAllEclairs(data || []);
+    } catch (error) {
+      console.error('Erro ao carregar éclairs:', error);
+    }
+  };
+
+  const handleFlavorToggle = (flavorId: string) => {
+    const size = parseInt(boxSize);
+    const index = selectedFlavors.indexOf(flavorId);
+    
+    if (index > -1) {
+      // Remover sabor
+      setSelectedFlavors(selectedFlavors.filter(id => id !== flavorId));
+    } else {
+      // Adicionar sabor (se ainda não atingiu o limite)
+      if (selectedFlavors.length < size) {
+        setSelectedFlavors([...selectedFlavors, flavorId]);
+      } else {
+        toast.error(`Selecione apenas ${size} sabores para uma caixa de ${size} unidades`);
+      }
     }
   };
 
@@ -77,12 +127,19 @@ const Produto = () => {
     let finalQuantity = quantity;
     const options: any = {};
 
-    // Para éclairs, calcular preço baseado no tamanho da caixa
+    // Para éclairs, validar sabores selecionados
     if (product.category === 'eclair') {
       const size = parseInt(boxSize);
+      
+      if (selectedFlavors.length !== size) {
+        toast.error(`Por favor, selecione exatamente ${size} sabores para a caixa de ${size} unidades`);
+        return;
+      }
+
       finalPrice = Number(product.base_price) * size;
       finalQuantity = quantity; // Quantidade de caixas
       options.boxSize = size;
+      options.flavors = selectedFlavors;
     }
 
     // Para rocamboles, adicionar tipo de massa
@@ -90,9 +147,16 @@ const Produto = () => {
       options.massType = massType;
     }
 
+    // Para éclairs, usar um nome genérico
+    const itemName = product.category === 'eclair' 
+      ? `Caixa de Éclairs (${parseInt(boxSize)} unidades)`
+      : product.name;
+
+    // Para éclairs, usar o primeiro sabor como productId (para compatibilidade com backend)
+    // Os sabores selecionados estarão nas options
     addToCart({
-      productId: product.id,
-      name: product.name,
+      productId: product.category === 'eclair' ? selectedFlavors[0] : product.id,
+      name: itemName,
       price: finalPrice,
       quantity: finalQuantity,
       category: product.category,
@@ -131,6 +195,10 @@ const Produto = () => {
   const displayPrice = product.category === 'eclair' 
     ? Number(product.base_price) * parseInt(boxSize)
     : Number(product.base_price);
+
+  const canAddToCart = product.category === 'eclair' 
+    ? selectedFlavors.length === parseInt(boxSize)
+    : true;
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -181,29 +249,69 @@ const Produto = () => {
 
               {/* Opções específicas por categoria */}
               {product.category === 'eclair' && (
-                <div className="mb-6">
-                  <Label className="text-base mb-3 block">Tamanho da Caixa</Label>
-                  <RadioGroup value={boxSize} onValueChange={setBoxSize}>
-                    <div className="flex items-center space-x-2 mb-2">
-                      <RadioGroupItem value="2" id="box-2" />
-                      <Label htmlFor="box-2" className="cursor-pointer">
-                        Caixa com 2 unidades ({(Number(product.base_price) * 2).toFixed(2)}€)
-                      </Label>
+                <>
+                  <div className="mb-6">
+                    <Label className="text-base mb-3 block">Tamanho da Caixa</Label>
+                    <RadioGroup value={boxSize} onValueChange={setBoxSize}>
+                      <div className="flex items-center space-x-2 mb-2">
+                        <RadioGroupItem value="2" id="box-2" />
+                        <Label htmlFor="box-2" className="cursor-pointer">
+                          Caixa com 2 unidades ({(Number(product.base_price) * 2).toFixed(2)}€)
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2 mb-2">
+                        <RadioGroupItem value="3" id="box-3" />
+                        <Label htmlFor="box-3" className="cursor-pointer">
+                          Caixa com 3 unidades ({(Number(product.base_price) * 3).toFixed(2)}€)
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="6" id="box-6" />
+                        <Label htmlFor="box-6" className="cursor-pointer">
+                          Caixa com 6 unidades ({(Number(product.base_price) * 6).toFixed(2)}€)
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+
+                  <div className="mb-6">
+                    <Label className="text-base mb-3 block">
+                      Escolha os Sabores ({selectedFlavors.length}/{boxSize} selecionados)
+                    </Label>
+                    <div className="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-4">
+                      {allEclairs.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">A carregar sabores...</p>
+                      ) : (
+                        allEclairs.map((eclair) => {
+                          const isSelected = selectedFlavors.includes(eclair.id);
+                          const isDisabled = !isSelected && selectedFlavors.length >= parseInt(boxSize);
+                          
+                          return (
+                            <div key={eclair.id} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`flavor-${eclair.id}`}
+                                checked={isSelected}
+                                disabled={isDisabled}
+                                onCheckedChange={() => handleFlavorToggle(eclair.id)}
+                              />
+                              <Label
+                                htmlFor={`flavor-${eclair.id}`}
+                                className={`cursor-pointer flex-1 ${isDisabled ? 'opacity-50' : ''}`}
+                              >
+                                {eclair.name}
+                              </Label>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
-                    <div className="flex items-center space-x-2 mb-2">
-                      <RadioGroupItem value="3" id="box-3" />
-                      <Label htmlFor="box-3" className="cursor-pointer">
-                        Caixa com 3 unidades ({(Number(product.base_price) * 3).toFixed(2)}€)
-                      </Label>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <RadioGroupItem value="6" id="box-6" />
-                      <Label htmlFor="box-6" className="cursor-pointer">
-                        Caixa com 6 unidades ({(Number(product.base_price) * 6).toFixed(2)}€)
-                      </Label>
-                    </div>
-                  </RadioGroup>
-                </div>
+                    {selectedFlavors.length > 0 && (
+                      <p className="text-sm text-muted-foreground mt-2">
+                        Sabores selecionados: {selectedFlavors.length} de {boxSize}
+                      </p>
+                    )}
+                  </div>
+                </>
               )}
 
               {product.category === 'rocambole' && (
@@ -257,9 +365,12 @@ const Produto = () => {
                 size="lg" 
                 className="w-full gap-2 text-lg"
                 onClick={handleAddToCart}
+                disabled={!canAddToCart}
               >
                 <ShoppingCart className="h-5 w-5" />
-                Adicionar ao Carrinho
+                {product.category === 'eclair' && !canAddToCart 
+                  ? `Selecione ${parseInt(boxSize) - selectedFlavors.length} sabores restantes`
+                  : 'Adicionar ao Carrinho'}
               </Button>
             </div>
           </div>

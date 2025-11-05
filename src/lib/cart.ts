@@ -7,6 +7,7 @@ export interface CartItem {
   category: string;
   options?: {
     boxSize?: number; // Para éclairs: 2, 3 ou 6
+    flavors?: string[]; // Para éclairs: IDs dos sabores selecionados
     massType?: 'chocolate' | 'branca'; // Para rocamboles
   };
   image?: string;

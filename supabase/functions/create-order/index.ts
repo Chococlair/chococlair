@@ -53,23 +53,56 @@ serve(async (req) => {
     }
 
     // Fetch products from database to get real prices
-    const productIds = items.map(item => item.productId);
+    // Para éclairs, precisamos buscar todos os sabores mencionados nas options
+    const allProductIds = new Set<string>();
+    items.forEach(item => {
+      allProductIds.add(item.productId);
+      // Se for éclair com sabores, adicionar todos os sabores
+      if (item.category === 'eclair' && item.options?.flavors) {
+        item.options.flavors.forEach((flavorId: string) => allProductIds.add(flavorId));
+      }
+    });
+
+    if (allProductIds.size === 0) {
+      throw new Error('No products to validate');
+    }
+
     const { data: products, error: productsError } = await supabase
       .from('products')
       .select('id, name, base_price, category, available')
-      .in('id', productIds);
+      .in('id', Array.from(allProductIds));
 
     if (productsError) {
       console.error('Error fetching products:', productsError);
-      throw new Error('Failed to validate products');
+      throw new Error(`Failed to validate products: ${productsError.message}`);
     }
 
-    if (!products || products.length !== productIds.length) {
-      throw new Error('Some products not found');
+    if (!products || products.length === 0) {
+      throw new Error('No products found');
     }
 
-    // Check all products are available
-    const unavailable = products.filter(p => !p.available);
+    // Check all referenced products exist and are available
+    const productMap = new Map(products.map(p => [p.id, p]));
+    for (const item of items) {
+      if (!productMap.has(item.productId)) {
+        throw new Error(`Product not found: ${item.productId}`);
+      }
+      if (item.category === 'eclair' && item.options?.flavors) {
+        for (const flavorId of item.options.flavors) {
+          if (!productMap.has(flavorId)) {
+            throw new Error(`Flavor not found: ${flavorId}`);
+          }
+          const flavor = productMap.get(flavorId)!;
+          if (!flavor.available) {
+            throw new Error(`Flavor not available: ${flavor.name}`);
+          }
+        }
+      }
+    }
+
+    // Check only main products (not flavors) are available
+    const mainProductIds = items.map(item => item.productId);
+    const unavailable = products.filter(p => !p.available && mainProductIds.includes(p.id));
     if (unavailable.length > 0) {
       throw new Error(`Products not available: ${unavailable.map(p => p.name).join(', ')}`);
     }
@@ -77,15 +110,26 @@ serve(async (req) => {
     // Calculate prices server-side
     let subtotal = 0;
     const orderItems = items.map(item => {
-      const product = products.find(p => p.id === item.productId)!;
+      const product = productMap.get(item.productId)!;
       
       // Calculate unit price based on category and options
       let unitPrice = product.base_price;
+      let productName = product.name;
+      
       if (product.category === 'eclair' && item.options?.boxSize) {
         const boxSize = item.options.boxSize;
-        if (boxSize === 2) unitPrice = 6;
-        else if (boxSize === 3) unitPrice = 9;
-        else if (boxSize === 6) unitPrice = 18;
+        // Preço = preço base * tamanho da caixa
+        unitPrice = Number(product.base_price) * boxSize;
+        
+        // Se houver sabores selecionados, criar nome com os sabores
+        if (item.options?.flavors && item.options.flavors.length > 0) {
+          const flavorNames = item.options.flavors
+            .map((flavorId: string) => productMap.get(flavorId)?.name || '')
+            .filter(Boolean);
+          productName = `Caixa de Éclairs (${boxSize} unidades) - ${flavorNames.join(', ')}`;
+        } else {
+          productName = `Caixa de Éclairs (${boxSize} unidades)`;
+        }
       }
 
       const totalPrice = unitPrice * item.quantity;
@@ -93,7 +137,7 @@ serve(async (req) => {
 
       return {
         product_id: product.id,
-        product_name: product.name,
+        product_name: productName,
         quantity: item.quantity,
         unit_price: unitPrice,
         total_price: totalPrice,
@@ -107,6 +151,12 @@ serve(async (req) => {
 
     console.log('Order totals - Subtotal:', subtotal, 'Delivery:', deliveryFee, 'Total:', total);
 
+    // Normalize payment method (mbway -> dinheiro for now, since enum only has 'stripe' and 'dinheiro')
+    let paymentMethod = customerData.paymentMethod;
+    if (paymentMethod === 'mbway') {
+      paymentMethod = 'dinheiro'; // Map mbway to dinheiro temporarily
+    }
+
     // Create order in transaction
     const { data: order, error: orderError } = await supabase
       .from('orders')
@@ -116,7 +166,7 @@ serve(async (req) => {
         customer_phone: customerData.phone,
         delivery_address: customerData.deliveryAddress || null,
         delivery_type: customerData.deliveryType,
-        payment_method: customerData.paymentMethod,
+        payment_method: paymentMethod,
         subtotal,
         delivery_fee: deliveryFee,
         total,
@@ -167,6 +217,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error in create-order function:', error);
     const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+    console.error('Error details:', error);
     return new Response(
       JSON.stringify({ 
         success: false, 

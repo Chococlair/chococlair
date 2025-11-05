@@ -1,7 +1,9 @@
+import { useState, useEffect } from "react";
 import { ShoppingCart, User } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
+import { supabase } from "@/integrations/supabase/client";
 
 interface HeaderProps {
   cartItemsCount?: number;
@@ -9,7 +11,33 @@ interface HeaderProps {
 
 export const Header = ({ cartItemsCount = 0 }: HeaderProps) => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const isAdminRoute = location.pathname.startsWith('/admin');
+  
+  useEffect(() => {
+    checkSession();
+    
+    // Escutar mudanças de autenticação
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      checkSession();
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const checkSession = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    setIsLoggedIn(!!session);
+  };
+
+  const handleUserClick = () => {
+    if (isLoggedIn) {
+      navigate("/perfil");
+    } else {
+      navigate("/auth");
+    }
+  };
   
   if (isAdminRoute) return null;
   
@@ -45,7 +73,7 @@ export const Header = ({ cartItemsCount = 0 }: HeaderProps) => {
             </Link>
           </nav>
 
-          {/* Cart and Admin */}
+          {/* Cart and User */}
           <div className="flex items-center space-x-3">
             <Link to="/carrinho">
               <Button variant="outline" size="icon" className="relative">
@@ -61,11 +89,14 @@ export const Header = ({ cartItemsCount = 0 }: HeaderProps) => {
               </Button>
             </Link>
             
-            <Link to="/admin/login">
-              <Button variant="ghost" size="icon">
-                <User className="h-5 w-5" />
-              </Button>
-            </Link>
+            <Button 
+              variant="ghost" 
+              size="icon"
+              onClick={handleUserClick}
+              title={isLoggedIn ? "Meu Perfil" : "Fazer Login"}
+            >
+              <User className="h-5 w-5" />
+            </Button>
           </div>
         </div>
       </div>

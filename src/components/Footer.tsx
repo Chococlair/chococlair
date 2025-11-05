@@ -51,12 +51,14 @@ export const Footer = () => {
               </li>
               <li className="flex items-center space-x-2">
                 <Phone className="h-4 w-4" />
-                <span>+351 XXX XXX XXX</span>
+                <a href="tel:+351931662784" className="hover:text-accent transition-colors">
+                  +351 931 662 784
+                </a>
               </li>
               <li className="flex items-center space-x-2">
                 <Instagram className="h-4 w-4" />
-                <a href="#" className="hover:text-accent transition-colors">
-                  @chococlair
+                <a href="https://instagram.com/chococlairpt" target="_blank" rel="noopener noreferrer" className="hover:text-accent transition-colors">
+                  @chococlairpt
                 </a>
               </li>
             </ul>

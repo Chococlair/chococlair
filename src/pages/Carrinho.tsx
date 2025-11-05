@@ -52,6 +52,11 @@ const Carrinho = () => {
     
     if (item.category === 'eclair' && item.options?.boxSize) {
       parts.push(`Caixa com ${item.options.boxSize} unidades`);
+      
+      // Se houver sabores selecionados, mostrar (mas não temos os nomes aqui, apenas IDs)
+      if (item.options?.flavors && item.options.flavors.length > 0) {
+        parts.push(`${item.options.flavors.length} sabores selecionados`);
+      }
     }
     
     if (item.category === 'rocambole' && item.options?.massType) {
