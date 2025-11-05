@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { CheckCircle2, Clock, Package, Truck, MapPin, Home, ArrowLeft, Loader2 } from "lucide-react";
+import { CheckCircle2, Clock, Package, Truck, MapPin, Home, ArrowLeft, Loader2, ShoppingBag } from "lucide-react";
 import { getCartItemsCount } from "@/lib/cart";
 
 interface Order {
@@ -87,15 +87,35 @@ const PedidoTracking = () => {
   };
 
   const getStatusSteps = () => {
-    const steps = [
-      { key: 'pendente', label: 'Pedido Recebido', icon: CheckCircle2, completed: true },
-      { key: 'confirmado', label: 'Confirmado', icon: CheckCircle2 },
-      { key: 'em_preparacao', label: 'Em Preparação', icon: Package },
-      { key: 'a_caminho', label: 'A Caminho', icon: Truck },
-      { key: 'concluido', label: 'Concluído', icon: Home },
-    ];
+    // Se for recolher, não mostrar "A Caminho", mostrar "Pronto para Recolher"
+    const isPickup = order?.delivery_type === 'recolher';
+    
+    let steps;
+    if (isPickup) {
+      steps = [
+        { key: 'pendente', label: 'Pedido Recebido', icon: CheckCircle2, completed: true },
+        { key: 'confirmado', label: 'Confirmado', icon: CheckCircle2 },
+        { key: 'em_preparacao', label: 'Em Preparação', icon: Package },
+        { key: 'pronto_para_recolher', label: 'Pronto para Recolher', icon: ShoppingBag },
+        { key: 'concluido', label: 'Concluído', icon: Home },
+      ];
+    } else {
+      steps = [
+        { key: 'pendente', label: 'Pedido Recebido', icon: CheckCircle2, completed: true },
+        { key: 'confirmado', label: 'Confirmado', icon: CheckCircle2 },
+        { key: 'em_preparacao', label: 'Em Preparação', icon: Package },
+        { key: 'a_caminho', label: 'A Caminho', icon: Truck },
+        { key: 'concluido', label: 'Concluído', icon: Home },
+      ];
+    }
 
-    const statusIndex = steps.findIndex(s => s.key === order?.status);
+    // Mapear status "a_caminho" para "pronto_para_recolher" quando for recolher
+    let currentStatus = order?.status;
+    if (isPickup && currentStatus === 'a_caminho') {
+      currentStatus = 'pronto_para_recolher';
+    }
+
+    const statusIndex = steps.findIndex(s => s.key === currentStatus);
     
     return steps.map((step, index) => ({
       ...step,
@@ -105,24 +125,41 @@ const PedidoTracking = () => {
   };
 
   const getStatusLabel = (status: string) => {
+    const isPickup = order?.delivery_type === 'recolher';
+    
+    // Mapear "a_caminho" para "Pronto para Recolher" quando for recolher
+    if (isPickup && status === 'a_caminho') {
+      return 'Pronto para Recolher';
+    }
+    
     const labels: Record<string, string> = {
       pendente: 'Pendente',
       confirmado: 'Confirmado',
       em_preparacao: 'Em Preparação',
       a_caminho: 'A Caminho',
-      concluido: 'Concluído',
+      pronto_para_recolher: 'Pronto para Recolher',
+      concluido: isPickup ? 'Recolhido' : 'Concluído',
     };
     return labels[status] || status;
   };
 
   const getEstimatedTime = (status: string) => {
+    const isPickup = order?.delivery_type === 'recolher';
+    
     const estimates: Record<string, string> = {
       pendente: 'Aguardando confirmação...',
       confirmado: 'Confirmando pedido...',
       em_preparacao: 'Preparando seu pedido...',
-      a_caminho: 'A caminho da entrega!',
-      concluido: 'Pedido entregue!',
+      a_caminho: isPickup ? 'Seu pedido está pronto para recolher!' : 'A caminho da entrega!',
+      pronto_para_recolher: 'Seu pedido está pronto para recolher!',
+      concluido: isPickup ? 'Pedido recolhido!' : 'Pedido entregue!',
     };
+    
+    // Mapear "a_caminho" para "pronto_para_recolher" quando for recolher
+    if (isPickup && status === 'a_caminho') {
+      return estimates.pronto_para_recolher;
+    }
+    
     return estimates[status] || '';
   };
 

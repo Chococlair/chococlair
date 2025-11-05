@@ -381,7 +381,9 @@ const Admin = () => {
         newStatus = 'a_caminho';
         break;
       case 'pronto':
-        newStatus = order.delivery_type === 'entrega' ? 'a_caminho' : 'concluido';
+        // Para recolher, usar 'a_caminho' que será exibido como "Pronto para Recolher" no frontend
+        // Para entrega, também usar 'a_caminho' normalmente
+        newStatus = 'a_caminho';
         break;
       case 'concluir':
         newStatus = 'concluido';
