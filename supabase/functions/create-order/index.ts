@@ -151,10 +151,11 @@ serve(async (req) => {
 
     console.log('Order totals - Subtotal:', subtotal, 'Delivery:', deliveryFee, 'Total:', total);
 
-    // Normalize payment method (mbway -> dinheiro for now, since enum only has 'stripe' and 'dinheiro')
-    let paymentMethod = customerData.paymentMethod;
-    if (paymentMethod === 'mbway') {
-      paymentMethod = 'dinheiro'; // Map mbway to dinheiro temporarily
+    // Validate payment method
+    const validPaymentMethods = ['stripe', 'dinheiro', 'mbway'];
+    const paymentMethod = customerData.paymentMethod;
+    if (!validPaymentMethods.includes(paymentMethod)) {
+      throw new Error(`Invalid payment method: ${paymentMethod}`);
     }
 
     // Create order in transaction

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { LogOut, Package, Euro, Truck, CheckCircle, Clock, TrendingUp, Calendar, DollarSign, ShoppingBag, Filter } from "lucide-react";
+import { LogOut, Package, Euro, Truck, CheckCircle, Clock, TrendingUp, Calendar, DollarSign, ShoppingBag, Filter, Trash2 } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -22,6 +22,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from "recharts";
@@ -47,10 +57,123 @@ const Admin = () => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("todos");
   const [periodFilter, setPeriodFilter] = useState<string>("todos");
+  const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [previousOrdersCount, setPreviousOrdersCount] = useState(0);
 
   useEffect(() => {
     checkAdminAccess();
   }, []);
+
+  const loadOrders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching orders:', error);
+        throw error;
+      }
+      console.log('Orders loaded:', data?.length || 0);
+      setOrders(data || []);
+      return data || [];
+    } catch (error) {
+      console.error('Error loading orders:', error);
+      toast.error("Erro ao carregar pedidos. Você pode continuar usando o painel.");
+      // Não bloquear o acesso, apenas mostrar erro
+      setOrders([]);
+      return [];
+    }
+  };
+
+  // Realtime subscription para atualizações automáticas
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    // Função para tocar notificação sonora
+    const playNotificationSound = () => {
+      try {
+        // Criar um contexto de áudio simples usando Web Audio API
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        // Configurar frequência e duração (som de notificação agradável)
+        oscillator.frequency.value = 800; // Hz
+        oscillator.type = 'sine';
+
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.3);
+      } catch (error) {
+        console.error('Erro ao tocar som de notificação:', error);
+      }
+    };
+
+    let currentOrdersCount = 0;
+
+    // Carregar pedidos inicialmente
+    loadOrders().then((loadedOrders) => {
+      currentOrdersCount = loadedOrders.length;
+      setPreviousOrdersCount(loadedOrders.length);
+    });
+
+    // Configurar subscription para mudanças na tabela orders
+    const channel = supabase
+      .channel('orders_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Escutar todos os eventos (INSERT, UPDATE, DELETE)
+          schema: 'public',
+          table: 'orders',
+        },
+        async (payload) => {
+          console.log('Order change detected:', payload);
+          
+          // Recarregar pedidos
+          const updatedOrders = await loadOrders();
+          
+          // Se for um INSERT (novo pedido), tocar som e mostrar notificação
+          if (payload.eventType === 'INSERT') {
+            const newOrder = payload.new as Order;
+            
+            // Comparar contagem para garantir que é realmente um novo pedido
+            if (updatedOrders.length > currentOrdersCount) {
+              currentOrdersCount = updatedOrders.length;
+              
+              // Tocar som e mostrar notificação
+              setTimeout(() => {
+                playNotificationSound();
+                toast.success(`Novo pedido recebido!`, {
+                  description: `Pedido #${newOrder.id.slice(0, 8).toUpperCase()} - ${newOrder.customer_name} - ${newOrder.total.toFixed(2)}€`,
+                  duration: 5000,
+                });
+              }, 300);
+            }
+          } else if (payload.eventType === 'UPDATE') {
+            // Atualizar contagem também para UPDATEs
+            currentOrdersCount = updatedOrders.length;
+          } else if (payload.eventType === 'DELETE') {
+            // Atualizar contagem para DELETEs
+            currentOrdersCount = updatedOrders.length;
+          }
+        }
+      )
+      .subscribe();
+
+    // Cleanup subscription ao desmontar
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isAdmin]);
 
   const checkAdminAccess = async () => {
     try {
@@ -105,26 +228,6 @@ const Admin = () => {
     }
   };
 
-  const loadOrders = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching orders:', error);
-        throw error;
-      }
-      console.log('Orders loaded:', data?.length || 0);
-      setOrders(data || []);
-    } catch (error) {
-      console.error('Error loading orders:', error);
-      toast.error("Erro ao carregar pedidos. Você pode continuar usando o painel.");
-      // Não bloquear o acesso, apenas mostrar erro
-      setOrders([]);
-    }
-  };
 
   const updateOrderStatus = async (orderId: string, newStatus: 'pendente' | 'confirmado' | 'em_preparacao' | 'a_caminho' | 'concluido') => {
     try {
@@ -140,6 +243,41 @@ const Admin = () => {
     } catch (error) {
       console.error('Error updating order status:', error);
       toast.error("Erro ao atualizar status");
+    }
+  };
+
+  const handleDeleteOrder = async () => {
+    if (!orderToDelete) return;
+
+    setDeleteLoading(true);
+    try {
+      // Deletar os itens do pedido primeiro (devido ao CASCADE, isso é automático, mas vamos fazer explicitamente)
+      const { error: itemsError } = await supabase
+        .from('order_items')
+        .delete()
+        .eq('order_id', orderToDelete.id);
+
+      if (itemsError) {
+        console.error('Error deleting order items:', itemsError);
+        // Continua mesmo se houver erro (pode ser que já não existam)
+      }
+
+      // Deletar o pedido
+      const { error: orderError } = await supabase
+        .from('orders')
+        .delete()
+        .eq('id', orderToDelete.id);
+
+      if (orderError) throw orderError;
+
+      toast.success("Pedido excluído com sucesso");
+      setOrderToDelete(null);
+      await loadOrders();
+    } catch (error) {
+      console.error('Error deleting order:', error);
+      toast.error("Erro ao excluir pedido");
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -746,6 +884,7 @@ const Admin = () => {
                       <TableHead>Status</TableHead>
                           <TableHead>Ação Rápida</TableHead>
                           <TableHead>Alterar Status</TableHead>
+                      <TableHead>Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -834,6 +973,17 @@ const Admin = () => {
                             </SelectContent>
                           </Select>
                         </TableCell>
+                            <TableCell>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => setOrderToDelete(order)}
+                                className="w-full"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Excluir
+                              </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -845,6 +995,40 @@ const Admin = () => {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* Dialog de Confirmação de Exclusão */}
+      <AlertDialog open={!!orderToDelete} onOpenChange={(open) => !open && setOrderToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir este pedido?
+              <br />
+              <br />
+              <strong>Pedido:</strong> #{orderToDelete?.id.slice(0, 8).toUpperCase()}
+              <br />
+              <strong>Cliente:</strong> {orderToDelete?.customer_name}
+              <br />
+              <strong>Total:</strong> {orderToDelete?.total.toFixed(2)}€
+              <br />
+              <br />
+              <span className="text-destructive font-semibold">
+                Esta ação não pode ser desfeita!
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteLoading}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteOrder}
+              disabled={deleteLoading}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteLoading ? "Excluindo..." : "Excluir Pedido"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
