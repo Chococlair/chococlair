@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { LogOut, Package, Euro, Truck, CheckCircle, Clock, TrendingUp, Calendar, DollarSign, ShoppingBag, Filter, Trash2 } from "lucide-react";
+import { LogOut, Package, Euro, Truck, CheckCircle, Clock, TrendingUp, Calendar, DollarSign, ShoppingBag, Filter, Trash2, Eye } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -32,6 +32,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from "recharts";
@@ -45,9 +54,20 @@ interface Order {
   delivery_address: string | null;
   payment_method: string;
   total: number;
+  subtotal?: number;
+  delivery_fee?: number;
   status: string;
   created_at: string;
   notes: string | null;
+}
+
+interface OrderItem {
+  id: string;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  options: any;
 }
 
 const Admin = () => {
@@ -60,6 +80,9 @@ const Admin = () => {
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [previousOrdersCount, setPreviousOrdersCount] = useState(0);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [loadingItems, setLoadingItems] = useState(false);
 
   useEffect(() => {
     checkAdminAccess();
@@ -423,6 +446,29 @@ const Admin = () => {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate("/");
+  };
+
+  const loadOrderItems = async (orderId: string) => {
+    setLoadingItems(true);
+    try {
+      const { data, error } = await supabase
+        .from('order_items')
+        .select('*')
+        .eq('order_id', orderId);
+
+      if (error) throw error;
+      setOrderItems(data || []);
+    } catch (error) {
+      console.error('Erro ao carregar itens do pedido:', error);
+      toast.error('Erro ao carregar itens do pedido');
+    } finally {
+      setLoadingItems(false);
+    }
+  };
+
+  const handleViewDetails = async (order: Order) => {
+    setSelectedOrder(order);
+    await loadOrderItems(order.id);
   };
 
   const getStatusBadgeVariant = (status: string) => {
@@ -1036,15 +1082,26 @@ const Admin = () => {
                           </Select>
                         </TableCell>
                             <TableCell>
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => setOrderToDelete(order)}
-                                className="w-full"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Excluir
-                              </Button>
+                              <div className="flex flex-col gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleViewDetails(order)}
+                                  className="w-full"
+                                >
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  Ver Detalhes
+                                </Button>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => setOrderToDelete(order)}
+                                  className="w-full"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Excluir
+                                </Button>
+                              </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1057,6 +1114,162 @@ const Admin = () => {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* Dialog de Detalhes do Pedido */}
+      <Dialog open={!!selectedOrder} onOpenChange={(open) => !open && setSelectedOrder(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Detalhes do Pedido</DialogTitle>
+            <DialogDescription>
+              Informações completas do pedido
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedOrder && (
+            <div className="space-y-6">
+              {/* Informações do Pedido */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Informações do Pedido</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-foreground/70">Número do Pedido</span>
+                    <span className="font-mono text-sm text-foreground font-medium">
+                      {selectedOrder.id.slice(0, 8).toUpperCase()}
+                    </span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between">
+                    <span className="text-sm text-foreground/70">Data</span>
+                    <span className="text-sm text-foreground">
+                      {new Date(selectedOrder.created_at).toLocaleDateString('pt-PT', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                  <Separator />
+                  <div className="flex justify-between">
+                    <span className="text-sm text-foreground/70">Status</span>
+                    <Badge variant={getStatusBadgeVariant(selectedOrder.status)}>
+                      {getStatusLabel(selectedOrder.status)}
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Itens do Pedido */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Itens do Pedido</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {loadingItems ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Package className="h-6 w-6 animate-spin text-primary" />
+                    </div>
+                  ) : orderItems.length === 0 ? (
+                    <p className="text-center text-foreground/70 py-4">Nenhum item encontrado</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {orderItems.map((item) => (
+                        <div key={item.id} className="flex justify-between items-start py-2 border-b last:border-0">
+                          <div className="flex-1">
+                            <p className="font-medium text-foreground">{item.product_name}</p>
+                            <p className="text-sm text-foreground/70">
+                              {item.quantity}x {item.unit_price.toFixed(2)}€
+                            </p>
+                          </div>
+                          <p className="font-medium text-foreground">
+                            {item.total_price.toFixed(2)}€
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Resumo Financeiro */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Resumo</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-foreground/70">Subtotal</span>
+                    <span className="text-foreground font-medium">
+                      {(selectedOrder.subtotal || selectedOrder.total - (selectedOrder.delivery_fee || 0)).toFixed(2)}€
+                    </span>
+                  </div>
+                  {selectedOrder.delivery_fee !== undefined && selectedOrder.delivery_fee > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-foreground/70">Taxa de Entrega</span>
+                      <span className="text-foreground font-medium">
+                        {selectedOrder.delivery_fee.toFixed(2)}€
+                      </span>
+                    </div>
+                  )}
+                  <Separator />
+                  <div className="flex justify-between text-lg font-bold">
+                    <span className="text-foreground">Total</span>
+                    <span className="text-primary">{selectedOrder.total.toFixed(2)}€</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Informações do Cliente */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Informações do Cliente</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div>
+                    <span className="text-sm text-foreground/70">Nome</span>
+                    <p className="text-foreground font-medium">{selectedOrder.customer_name}</p>
+                  </div>
+                  <div>
+                    <span className="text-sm text-foreground/70">Email</span>
+                    <p className="text-foreground">{selectedOrder.customer_email}</p>
+                  </div>
+                  <div>
+                    <span className="text-sm text-foreground/70">Telefone</span>
+                    <p className="text-foreground">{selectedOrder.customer_phone}</p>
+                  </div>
+                  {selectedOrder.delivery_address && (
+                    <div>
+                      <span className="text-sm text-foreground/70">Endereço de Entrega</span>
+                      <p className="text-foreground">{selectedOrder.delivery_address}</p>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-sm text-foreground/70">Tipo de Entrega</span>
+                    <Badge variant={selectedOrder.delivery_type === 'entrega' ? 'default' : 'secondary'} className="ml-2">
+                      {selectedOrder.delivery_type === 'entrega' ? 'Entrega' : 'Recolher'}
+                    </Badge>
+                  </div>
+                  <div>
+                    <span className="text-sm text-foreground/70">Método de Pagamento</span>
+                    <Badge variant="outline" className="ml-2">
+                      {selectedOrder.payment_method === 'dinheiro' ? 'Dinheiro' : 'MB WAY'}
+                    </Badge>
+                  </div>
+                  {selectedOrder.notes && (
+                    <div>
+                      <span className="text-sm text-foreground/70">Observações</span>
+                      <p className="text-foreground">{selectedOrder.notes}</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog de Confirmação de Exclusão */}
       <AlertDialog open={!!orderToDelete} onOpenChange={(open) => !open && setOrderToDelete(null)}>

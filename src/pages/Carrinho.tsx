@@ -133,9 +133,9 @@ const Carrinho = () => {
 
           {isEmpty ? (
             <Card className="p-12 text-center">
-              <ShoppingBag className="h-20 w-20 mx-auto mb-4 text-muted-foreground" />
+              <ShoppingBag className="h-20 w-20 mx-auto mb-4 text-foreground/50" />
               <h2 className="text-2xl font-semibold mb-2">O seu carrinho está vazio</h2>
-              <p className="text-muted-foreground mb-6">
+              <p className="text-foreground/70 mb-6">
                 Adicione produtos ao carrinho para continuar
               </p>
               <Link to="/produtos">
