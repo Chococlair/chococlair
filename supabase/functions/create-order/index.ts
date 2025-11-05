@@ -7,7 +7,9 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
+  // Logs IMEDIATOS no início - devem aparecer sempre
   console.log('=== EDGE FUNCTION CHAMADA ===');
+  console.log('Timestamp:', new Date().toISOString());
   console.log('Method:', req.method);
   console.log('URL:', req.url);
   
@@ -19,15 +21,27 @@ serve(async (req) => {
   try {
     console.log('Iniciando processamento do pedido...');
     
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    // Verificar variáveis de ambiente PRIMEIRO
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     
     console.log('Supabase URL:', supabaseUrl ? 'Definido' : 'NÃO DEFINIDO');
     console.log('Supabase Key:', supabaseKey ? 'Definido' : 'NÃO DEFINIDO');
     
     if (!supabaseUrl || !supabaseKey) {
       console.error('❌ Variáveis de ambiente não configuradas!');
-      throw new Error('Supabase configuration missing');
+      console.error('SUPABASE_URL:', supabaseUrl);
+      console.error('SUPABASE_SERVICE_ROLE_KEY:', supabaseKey ? 'Presente' : 'Ausente');
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: 'Supabase configuration missing' 
+        }),
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 500 
+        }
+      );
     }
     
     const supabase = createClient(supabaseUrl, supabaseKey);
@@ -39,29 +53,84 @@ serve(async (req) => {
     
     if (!authHeader) {
       console.error('❌ No authorization header provided');
-      throw new Error('No authorization header');
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: 'No authorization header' 
+        }),
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 401 
+        }
+      );
     }
 
     // Verify user is authenticated
     console.log('Verificando autenticação do usuário...');
-    const { data: { user }, error: userError } = await supabase.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    );
+    let user;
+    let userError;
+    
+    try {
+      const authResult = await supabase.auth.getUser(
+        authHeader.replace('Bearer ', '')
+      );
+      user = authResult.data.user;
+      userError = authResult.error;
+    } catch (err) {
+      console.error('❌ Erro ao chamar getUser:', err);
+      userError = err as any;
+    }
 
     if (userError) {
       console.error('❌ Erro ao verificar usuário:', userError);
-      throw new Error(`Unauthorized: ${userError.message}`);
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: `Unauthorized: ${userError.message || 'Authentication failed'}` 
+        }),
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 401 
+        }
+      );
     }
 
     if (!user) {
       console.error('❌ Usuário não encontrado');
-      throw new Error('Unauthorized: User not found');
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: 'Unauthorized: User not found' 
+        }),
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 401 
+        }
+      );
     }
 
     console.log('✅ Usuário autenticado:', user.email);
 
-    const body = await req.json();
-    console.log('Request body recebido:', JSON.stringify(body, null, 2));
+    // Parse body com tratamento de erro
+    let body;
+    try {
+      const bodyText = await req.text();
+      console.log('Body text recebido (primeiros 500 chars):', bodyText.substring(0, 500));
+      body = JSON.parse(bodyText);
+      console.log('Request body parseado:', JSON.stringify(body, null, 2));
+    } catch (parseError) {
+      console.error('❌ Erro ao parsear body:', parseError);
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: `Invalid request body: ${parseError instanceof Error ? parseError.message : 'Unknown error'}` 
+        }),
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 400 
+        }
+      );
+    }
     
     const { items, customerData } = body;
     
@@ -261,15 +330,24 @@ serve(async (req) => {
     );
 
   } catch (error) {
+    // Logs DETALHADOS do erro
     console.error('❌❌❌ ERRO NA EDGE FUNCTION ❌❌❌');
+    console.error('Timestamp:', new Date().toISOString());
     console.error('Error type:', error?.constructor?.name);
     console.error('Error message:', error instanceof Error ? error.message : 'Unknown error');
     console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
-    console.error('Full error object:', JSON.stringify(error, null, 2));
+    
+    try {
+      console.error('Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+    } catch (stringifyError) {
+      console.error('Erro ao stringificar error object:', stringifyError);
+      console.error('Error toString:', String(error));
+    }
     
     const errorMessage = error instanceof Error ? error.message : 'An error occurred';
     
     console.error('Retornando erro para o cliente:', errorMessage);
+    console.error('Status code: 400');
     
     return new Response(
       JSON.stringify({ 

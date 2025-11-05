@@ -108,23 +108,29 @@ const Checkout = () => {
         // Se houver erro, tentar ler o body da resposta HTTP diretamente
         if (response.error) {
           console.error('❌ ERROR creating order:', response.error);
+          console.error('Error context:', response.error.context);
           
           // Tentar ler o body da resposta HTTP diretamente
           let errorMessage = 'Erro ao criar pedido';
           
           try {
-            // Se response.error tem uma propriedade response, tentar ler o body
+            // Tentar ler o response se disponível
             if (response.error.context?.response) {
-              const responseBody = await response.error.context.response.text();
-              console.log('Response body from error:', responseBody);
+              const responseClone = response.error.context.response.clone();
+              const responseBody = await responseClone.text();
+              console.log('📄 Response body from error:', responseBody);
               try {
                 const parsedBody = JSON.parse(responseBody);
                 if (parsedBody.error) {
                   errorMessage = parsedBody.error;
-                  console.log('Error message from body:', errorMessage);
+                  console.log('✅ Error message from body:', errorMessage);
                 }
               } catch (e) {
                 console.error('Error parsing response body:', e);
+                // Se não conseguir parsear, usar o texto como erro
+                if (responseBody) {
+                  errorMessage = responseBody;
+                }
               }
             }
           } catch (e) {
@@ -134,10 +140,13 @@ const Checkout = () => {
           // Fallback para outras fontes de erro
           if (response.data && typeof response.data === 'object' && 'error' in response.data) {
             errorMessage = response.data.error;
+            console.log('✅ Error from response.data:', errorMessage);
           } else if (response.error.message) {
             errorMessage = response.error.message;
+            console.log('✅ Error from response.error.message:', errorMessage);
           }
           
+          console.error('🚨 Final error message:', errorMessage);
           throw new Error(errorMessage);
         }
 
