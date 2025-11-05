@@ -127,7 +127,11 @@ const Admin = () => {
 
     // Configurar subscription para mudanças na tabela orders
     const channel = supabase
-      .channel('orders_changes')
+      .channel('orders_changes', {
+        config: {
+          broadcast: { self: true },
+        },
+      })
       .on(
         'postgres_changes',
         {
@@ -167,7 +171,14 @@ const Admin = () => {
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('Successfully subscribed to orders changes');
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('Error subscribing to orders changes');
+        }
+      });
 
     // Cleanup subscription ao desmontar
     return () => {
@@ -1001,20 +1012,22 @@ const Admin = () => {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirmar Exclusão</AlertDialogTitle>
-            <AlertDialogDescription>
-              Tem certeza que deseja excluir este pedido?
-              <br />
-              <br />
-              <strong>Pedido:</strong> #{orderToDelete?.id.slice(0, 8).toUpperCase()}
-              <br />
-              <strong>Cliente:</strong> {orderToDelete?.customer_name}
-              <br />
-              <strong>Total:</strong> {orderToDelete?.total.toFixed(2)}€
-              <br />
-              <br />
-              <span className="text-destructive font-semibold">
+            <AlertDialogDescription className="text-foreground">
+              <p className="mb-4">Tem certeza que deseja excluir este pedido?</p>
+              <div className="space-y-2 mb-4">
+                <p className="text-foreground">
+                  <strong className="text-foreground">Pedido:</strong> #{orderToDelete?.id.slice(0, 8).toUpperCase()}
+                </p>
+                <p className="text-foreground">
+                  <strong className="text-foreground">Cliente:</strong> {orderToDelete?.customer_name}
+                </p>
+                <p className="text-foreground">
+                  <strong className="text-foreground">Total:</strong> {orderToDelete?.total.toFixed(2)}€
+                </p>
+              </div>
+              <p className="text-destructive font-semibold">
                 Esta ação não pode ser desfeita!
-              </span>
+              </p>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

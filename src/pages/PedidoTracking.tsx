@@ -244,13 +244,13 @@ const PedidoTracking = () => {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <p className="text-sm text-muted-foreground mb-1">Número do Pedido</p>
-                    <p className="font-mono text-sm">{order.id.slice(0, 8).toUpperCase()}</p>
+                    <p className="text-sm text-foreground/70 mb-1">Número do Pedido</p>
+                    <p className="font-mono text-sm text-foreground">{order.id.slice(0, 8).toUpperCase()}</p>
                   </div>
 
                   <div>
-                    <p className="text-sm text-muted-foreground mb-1">Data</p>
-                    <p className="text-sm">
+                    <p className="text-sm text-foreground/70 mb-1">Data</p>
+                    <p className="text-sm text-foreground">
                       {new Date(order.created_at).toLocaleDateString('pt-PT', {
                         day: '2-digit',
                         month: '2-digit',
@@ -262,30 +262,30 @@ const PedidoTracking = () => {
                   </div>
 
                   <div className="space-y-2">
-                    <p className="text-sm text-muted-foreground mb-2">Itens do Pedido</p>
+                    <p className="text-sm text-foreground/70 mb-2">Itens do Pedido</p>
                     {orderItems.map((item) => (
                       <div key={item.id} className="flex justify-between text-sm py-2 border-b last:border-0">
-                        <span>
+                        <span className="text-foreground">
                           {item.quantity}x {item.product_name}
                         </span>
-                        <span className="font-medium">{item.total_price.toFixed(2)}€</span>
+                        <span className="font-medium text-foreground">{item.total_price.toFixed(2)}€</span>
                       </div>
                     ))}
                   </div>
 
                   <div className="pt-4 border-t">
                     <div className="flex justify-between text-sm mb-2">
-                      <span>Subtotal</span>
-                      <span>{order.total.toFixed(2)}€</span>
+                      <span className="text-foreground">Subtotal</span>
+                      <span className="text-foreground">{order.total.toFixed(2)}€</span>
                     </div>
                     {order.delivery_type === 'entrega' && (
-                      <div className="flex justify-between text-sm mb-2 text-muted-foreground">
-                        <span>Taxa de Entrega</span>
-                        <span>1.50€</span>
+                      <div className="flex justify-between text-sm mb-2">
+                        <span className="text-foreground/70">Taxa de Entrega</span>
+                        <span className="text-foreground/70">1.50€</span>
                       </div>
                     )}
                     <div className="flex justify-between font-bold text-lg pt-2 border-t">
-                      <span>Total</span>
+                      <span className="text-foreground">Total</span>
                       <span className="text-primary">{order.total.toFixed(2)}€</span>
                     </div>
                   </div>
@@ -301,7 +301,7 @@ const PedidoTracking = () => {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <p className="text-sm text-muted-foreground mb-1">Tipo de Entrega</p>
+                    <p className="text-sm text-foreground/70 mb-1">Tipo de Entrega</p>
                     <Badge variant={order.delivery_type === 'entrega' ? 'default' : 'secondary'}>
                       {order.delivery_type === 'entrega' ? (
                         <><Truck className="h-3 w-3 mr-1" /> Entrega</>
@@ -313,25 +313,25 @@ const PedidoTracking = () => {
 
                   {order.delivery_type === 'entrega' && order.delivery_address && (
                     <div>
-                      <p className="text-sm text-muted-foreground mb-1 flex items-center">
+                      <p className="text-sm text-foreground/70 mb-1 flex items-center">
                         <MapPin className="h-4 w-4 mr-1" />
                         Endereço
                       </p>
-                      <p className="text-sm">{order.delivery_address}</p>
+                      <p className="text-sm text-foreground">{order.delivery_address}</p>
                     </div>
                   )}
 
                   <div>
-                    <p className="text-sm text-muted-foreground mb-1">Pagamento</p>
-                    <p className="text-sm">
-                      {order.payment_method === 'dinheiro' ? 'Dinheiro' : 'MB WAY'}
+                    <p className="text-sm text-foreground/70 mb-1">Pagamento</p>
+                    <p className="text-sm text-foreground">
+                      {order.payment_method === 'dinheiro' ? 'Dinheiro' : order.payment_method === 'mbway' ? 'MB WAY' : 'MB WAY'}
                     </p>
                   </div>
 
                   {order.notes && (
                     <div>
-                      <p className="text-sm text-muted-foreground mb-1">Observações</p>
-                      <p className="text-sm">{order.notes}</p>
+                      <p className="text-sm text-foreground/70 mb-1">Observações</p>
+                      <p className="text-sm text-foreground">{order.notes}</p>
                     </div>
                   )}
                 </CardContent>
@@ -342,9 +342,9 @@ const PedidoTracking = () => {
                   <CardTitle>Contacto</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
-                  <p>{order.customer_name}</p>
-                  <p className="text-muted-foreground">{order.customer_email}</p>
-                  <p className="text-muted-foreground">{order.customer_phone}</p>
+                  <p className="text-foreground font-medium">{order.customer_name}</p>
+                  <p className="text-foreground">{order.customer_email}</p>
+                  <p className="text-foreground">{order.customer_phone}</p>
                 </CardContent>
               </Card>
             </div>

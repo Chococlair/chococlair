@@ -62,5 +62,12 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+    /* Prevenir zoom em dispositivos móveis */
+    touch-action: pan-x pan-y;
+  }
+
+  /* Prevenir zoom em double tap - mas permitir seleção de texto */
+  button, a, img, svg {
+    touch-action: manipulation;
   }
 }
