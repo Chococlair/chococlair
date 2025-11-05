@@ -7,6 +7,8 @@ import Index from "./pages/Index";
 import Produtos from "./pages/Produtos";
 import Produto from "./pages/Produto";
 import Carrinho from "./pages/Carrinho";
+import Auth from "./pages/Auth";
+import Checkout from "./pages/Checkout";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -22,6 +24,8 @@ const App = () => (
           <Route path="/produtos" element={<Produtos />} />
           <Route path="/produto/:id" element={<Produto />} />
           <Route path="/carrinho" element={<Carrinho />} />
+          <Route path="/auth" element={<Auth />} />
+          <Route path="/checkout" element={<Checkout />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
