@@ -93,85 +93,53 @@ const Checkout = () => {
       console.log('Payment method:', paymentMethod);
       console.log('Payment method type:', typeof paymentMethod);
 
-      // Call secure Edge Function usando fetch diretamente para ter mais controle
-      console.log('📤 Chamando Edge Function...');
+      // Call secure Edge Function usando o cliente Supabase
+      console.log('📤 Chamando Edge Function via Supabase client...');
       
       try {
         // Obter a sessão atual
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.error('Erro ao obter sessão:', sessionError);
+          throw new Error('Erro ao verificar sessão. Por favor, faça login novamente.');
+        }
+        
         if (!session) {
           throw new Error('Sessão expirada. Por favor, faça login novamente.');
         }
 
-        // Chamar Edge Function diretamente com fetch para ter acesso ao body
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-        const functionUrl = `${supabaseUrl}/functions/v1/create-order`;
+        console.log('Session token presente:', !!session.access_token);
+        console.log('Session token length:', session.access_token?.length || 0);
         
-        console.log('Function URL:', functionUrl);
-        console.log('Using session token:', session.access_token ? 'Presente' : 'Ausente');
-        
-        console.log('Access token (primeiros 20 chars):', session.access_token.substring(0, 20) + '...');
-        console.log('Access token length:', session.access_token.length);
-        
-        const fetchResponse = await fetch(functionUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-            'apikey': supabaseKey || '',
-            'x-client-info': 'chococlair-web',
-          },
-          body: JSON.stringify(orderData),
+        // Chamar Edge Function usando o cliente Supabase
+        const { data, error } = await supabase.functions.invoke('create-order', {
+          body: orderData,
         });
 
-        console.log('📥 Fetch response status:', fetchResponse.status);
-        console.log('📥 Fetch response ok:', fetchResponse.ok);
-        
-        // Ler o body da resposta
-        let responseBody = '';
-        let responseData = null;
-        
-        try {
-          responseBody = await fetchResponse.text();
-          console.log('📄 Response body (raw):', responseBody);
-          
-          if (responseBody) {
-            try {
-              responseData = JSON.parse(responseBody);
-              console.log('📄 Response data (parsed):', responseData);
-            } catch (e) {
-              console.error('Error parsing response body as JSON:', e);
-            }
-          }
-        } catch (e) {
-          console.error('Error reading response body:', e);
+        console.log('📥 Edge Function response:', data);
+        console.log('📥 Edge Function error:', error);
+
+        if (error) {
+          console.error('❌ ERROR creating order:', error);
+          console.error('Error message:', error.message);
+          console.error('Error context:', error.context);
+          throw new Error(error.message || 'Erro ao criar pedido');
         }
 
-        // Se não for sucesso, tratar como erro
-        if (!fetchResponse.ok) {
-          const errorMessage = responseData?.error || responseBody || `Erro ${fetchResponse.status}: ${fetchResponse.statusText}`;
-          console.error('❌ ERROR creating order:', errorMessage);
-          console.error('Status:', fetchResponse.status);
-          console.error('Response data:', responseData);
-          throw new Error(errorMessage);
-        }
-
-        // Se chegou aqui, foi sucesso
-        if (!responseData || !responseData.success) {
-          const errorMsg = responseData?.error || 'Erro ao criar pedido';
+        if (!data || !data.success) {
+          const errorMsg = data?.error || 'Erro ao criar pedido';
           console.error('Order creation failed:', errorMsg);
           throw new Error(errorMsg);
         }
 
-        console.log('Order created successfully:', responseData);
+        console.log('Order created successfully:', data);
 
         // Clear cart
         clearCart();
 
         toast.success("Pedido realizado com sucesso!");
         // Redirecionar para página de acompanhamento
-        navigate(`/pedido/${responseData.orderId}`);
+        navigate(`/pedido/${data.orderId}`);
       } catch (error: any) {
         console.error('Checkout error:', error);
         toast.error(error.message || "Erro ao finalizar pedido");
