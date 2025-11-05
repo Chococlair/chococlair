@@ -111,12 +111,16 @@ const Checkout = () => {
         console.log('Function URL:', functionUrl);
         console.log('Using session token:', session.access_token ? 'Presente' : 'Ausente');
         
+        console.log('Access token (primeiros 20 chars):', session.access_token.substring(0, 20) + '...');
+        console.log('Access token length:', session.access_token.length);
+        
         const fetchResponse = await fetch(functionUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${session.access_token}`,
             'apikey': supabaseKey || '',
+            'x-client-info': 'chococlair-web',
           },
           body: JSON.stringify(orderData),
         });

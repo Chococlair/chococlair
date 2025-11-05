@@ -50,6 +50,7 @@ serve(async (req) => {
     // Get JWT from Authorization header
     const authHeader = req.headers.get('Authorization');
     console.log('Authorization header:', authHeader ? 'Presente' : 'AUSENTE');
+    console.log('Todos os headers:', JSON.stringify(Object.fromEntries(req.headers.entries()), null, 2));
     
     if (!authHeader) {
       console.error('❌ No authorization header provided');
@@ -67,22 +68,36 @@ serve(async (req) => {
 
     // Verify user is authenticated
     console.log('Verificando autenticação do usuário...');
+    console.log('Auth header completo:', authHeader);
+    console.log('Token (primeiros 20 chars):', authHeader.replace('Bearer ', '').substring(0, 20) + '...');
+    
     let user;
     let userError;
     
     try {
-      const authResult = await supabase.auth.getUser(
-        authHeader.replace('Bearer ', '')
-      );
-      user = authResult.data.user;
+      const token = authHeader.replace('Bearer ', '');
+      console.log('Token length:', token.length);
+      console.log('Chamando supabase.auth.getUser()...');
+      
+      const authResult = await supabase.auth.getUser(token);
+      console.log('Auth result recebido');
+      console.log('User:', authResult.data?.user ? 'Presente' : 'Ausente');
+      console.log('Error:', authResult.error ? JSON.stringify(authResult.error) : 'Nenhum');
+      
+      user = authResult.data?.user;
       userError = authResult.error;
     } catch (err) {
       console.error('❌ Erro ao chamar getUser:', err);
+      console.error('Error type:', err?.constructor?.name);
+      console.error('Error message:', err instanceof Error ? err.message : 'Unknown');
       userError = err as any;
     }
 
     if (userError) {
       console.error('❌ Erro ao verificar usuário:', userError);
+      console.error('Error code:', userError.code);
+      console.error('Error message:', userError.message);
+      console.error('Error status:', userError.status);
       return new Response(
         JSON.stringify({ 
           success: false, 
@@ -96,7 +111,7 @@ serve(async (req) => {
     }
 
     if (!user) {
-      console.error('❌ Usuário não encontrado');
+      console.error('❌ Usuário não encontrado após getUser()');
       return new Response(
         JSON.stringify({ 
           success: false, 
