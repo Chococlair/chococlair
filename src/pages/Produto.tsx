@@ -7,10 +7,18 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowLeft, ShoppingCart, Minus, Plus } from "lucide-react";
+import { ArrowLeft, ShoppingCart, Minus, Plus, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { getCart, getCartItemsCount, addToCart } from "@/lib/cart";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface Product {
   id: string;
@@ -32,6 +40,7 @@ const Produto = () => {
   const [boxSize, setBoxSize] = useState<string>("2");
   const [selectedFlavors, setSelectedFlavors] = useState<string[]>([]);
   const [massType, setMassType] = useState<string>("chocolate");
+  const [showCartDialog, setShowCartDialog] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -164,7 +173,8 @@ const Produto = () => {
       image: product.image_url || undefined
     });
 
-    toast.success('Produto adicionado ao carrinho!');
+    // Abrir dialog ao invés de apenas mostrar toast
+    setShowCartDialog(true);
   };
 
   const getCategoryLabel = (cat: string) => {
@@ -181,7 +191,7 @@ const Produto = () => {
       <div className="flex flex-col min-h-screen">
         <Header cartItemsCount={cartCount} />
         <main className="flex-1 flex items-center justify-center">
-          <p className="text-muted-foreground">A carregar produto...</p>
+          <p className="text-foreground">A carregar produto...</p>
         </main>
         <Footer />
       </div>
@@ -280,7 +290,7 @@ const Produto = () => {
                     </Label>
                     <div className="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-4">
                       {allEclairs.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">A carregar sabores...</p>
+                        <p className="text-sm text-foreground/70">A carregar sabores...</p>
                       ) : (
                         allEclairs.map((eclair) => {
                           const isSelected = selectedFlavors.includes(eclair.id);
@@ -306,7 +316,7 @@ const Produto = () => {
                       )}
                     </div>
                     {selectedFlavors.length > 0 && (
-                      <p className="text-sm text-muted-foreground mt-2">
+                      <p className="text-sm text-foreground/70 mt-2">
                         Sabores selecionados: {selectedFlavors.length} de {boxSize}
                       </p>
                     )}
@@ -378,6 +388,46 @@ const Produto = () => {
       </main>
 
       <Footer />
+
+      {/* Dialog de Confirmação ao Adicionar ao Carrinho */}
+      <Dialog open={showCartDialog} onOpenChange={setShowCartDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-primary/10">
+                <CheckCircle2 className="h-6 w-6 text-primary" />
+              </div>
+              <DialogTitle className="text-xl">Produto Adicionado!</DialogTitle>
+            </div>
+            <DialogDescription className="text-base pt-2 text-foreground">
+              O produto foi adicionado ao seu carrinho com sucesso.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowCartDialog(false);
+                navigate('/produtos');
+              }}
+              className="w-full sm:w-auto"
+            >
+              Continuar Comprando
+            </Button>
+            <Button
+              onClick={() => {
+                setShowCartDialog(false);
+                navigate('/carrinho');
+              }}
+              className="w-full sm:w-auto gap-2"
+            >
+              <ShoppingCart className="h-4 w-4" />
+              Ir para o Carrinho
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

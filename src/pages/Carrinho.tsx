@@ -167,7 +167,7 @@ const Carrinho = () => {
                         <div className="flex-1">
                           <h3 className="font-semibold text-lg">{item.name}</h3>
                           {getItemDescription(item) && (
-                            <p className="text-sm text-muted-foreground">
+                            <p className="text-sm text-foreground/70">
                               {getItemDescription(item)}
                             </p>
                           )}
@@ -229,7 +229,7 @@ const Carrinho = () => {
               <Card className="p-6">
                 <h2 className="text-xl font-bold mb-4">Resumo do Pedido</h2>
                 <div className="space-y-2">
-                  <div className="flex justify-between text-muted-foreground">
+                  <div className="flex justify-between text-foreground/70">
                     <span>Subtotal</span>
                     <span>{total.toFixed(2)}€</span>
                   </div>

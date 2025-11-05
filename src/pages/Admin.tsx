@@ -196,6 +196,7 @@ const Admin = () => {
               fontSize: '18px',
               fontWeight: 'bold',
             },
+            descriptionClassName: 'text-foreground font-medium',
           });
           
           // Recarregar pedidos
@@ -596,7 +597,7 @@ const Admin = () => {
         <Card className="max-w-md">
           <CardContent className="pt-6 text-center">
             <p className="mb-4 text-destructive font-semibold">Acesso Negado</p>
-            <p className="text-sm text-muted-foreground mb-4">
+            <p className="text-sm text-foreground/70 mb-4">
               Apenas administradores podem acessar esta página.
             </p>
             <Button onClick={() => navigate("/")}>Voltar ao início</Button>
@@ -983,16 +984,16 @@ const Admin = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Data</TableHead>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead>Contacto</TableHead>
-                      <TableHead>Entrega</TableHead>
-                      <TableHead>Pagamento</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Status</TableHead>
-                          <TableHead>Ação Rápida</TableHead>
-                          <TableHead>Alterar Status</TableHead>
-                      <TableHead>Ações</TableHead>
+                      <TableHead className="text-foreground font-semibold">Data</TableHead>
+                      <TableHead className="text-foreground font-semibold">Cliente</TableHead>
+                      <TableHead className="text-foreground font-semibold">Contacto</TableHead>
+                      <TableHead className="text-foreground font-semibold">Entrega</TableHead>
+                      <TableHead className="text-foreground font-semibold">Pagamento</TableHead>
+                      <TableHead className="text-foreground font-semibold">Total</TableHead>
+                      <TableHead className="text-foreground font-semibold">Status</TableHead>
+                      <TableHead className="text-foreground font-semibold">Ação Rápida</TableHead>
+                      <TableHead className="text-foreground font-semibold">Alterar Status</TableHead>
+                      <TableHead className="text-foreground font-semibold">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1060,7 +1061,7 @@ const Admin = () => {
                                   );
                                 })}
                                 {getQuickActions(order).length === 0 && (
-                                  <span className="text-sm text-muted-foreground">Sem ações</span>
+                                  <span className="text-sm text-foreground/70">Sem ações</span>
                                 )}
                               </div>
                         </TableCell>
@@ -1120,7 +1121,7 @@ const Admin = () => {
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Detalhes do Pedido</DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-foreground">
               Informações completas do pedido
             </DialogDescription>
           </DialogHeader>

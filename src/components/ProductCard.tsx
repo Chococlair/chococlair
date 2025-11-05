@@ -60,7 +60,7 @@ export const ProductCard = ({ id, name, category, price, image, description }: P
           </h3>
         </Link>
         {description && (
-          <p className="text-sm text-muted-foreground line-clamp-2">{description}</p>
+          <p className="text-sm text-foreground/70 line-clamp-2">{description}</p>
         )}
       </CardContent>
 

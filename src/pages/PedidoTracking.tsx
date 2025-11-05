@@ -207,7 +207,7 @@ const PedidoTracking = () => {
                                   ? 'bg-primary text-primary-foreground'
                                   : step.current
                                   ? 'bg-primary/20 text-primary border-2 border-primary'
-                                  : 'bg-muted text-muted-foreground'
+                                  : 'bg-muted text-foreground/70'
                               }`}
                             >
                               <Icon className="h-5 w-5" />
@@ -216,7 +216,7 @@ const PedidoTracking = () => {
                               className={`text-xs text-center ${
                                 step.completed || step.current
                                   ? 'text-foreground font-medium'
-                                  : 'text-muted-foreground'
+                                  : 'text-foreground/70'
                               }`}
                             >
                               {step.label}

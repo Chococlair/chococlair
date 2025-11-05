@@ -297,7 +297,7 @@ const Checkout = () => {
                   <Textarea
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Informações adicionais sobre o pedido..."
+                    placeholder="Ex: Preciso de troco para 20,00€"
                     maxLength={1000}
                   />
                 </CardContent>
@@ -326,7 +326,7 @@ const Checkout = () => {
                   <div key={item.id} className="flex justify-between text-sm">
                     <div>
                       <p className="font-medium">{item.name}</p>
-                      <p className="text-muted-foreground">Quantidade: {item.quantity}</p>
+                      <p className="text-foreground/70">Quantidade: {item.quantity}</p>
                     </div>
                     <p className="font-medium">{(item.price * item.quantity).toFixed(2)}€</p>
                   </div>

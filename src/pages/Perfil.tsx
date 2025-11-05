@@ -137,7 +137,7 @@ const Perfil = () => {
       case 'em_preparacao':
         return 'text-yellow-600';
       default:
-        return 'text-muted-foreground';
+        return 'text-foreground/70';
     }
   };
 
@@ -146,7 +146,7 @@ const Perfil = () => {
       <div className="flex flex-col min-h-screen">
         <Header cartItemsCount={cartCount} />
         <main className="flex-1 flex items-center justify-center">
-          <p className="text-muted-foreground">A carregar...</p>
+          <p className="text-foreground">A carregar...</p>
         </main>
         <Footer />
       </div>
@@ -161,7 +161,7 @@ const Perfil = () => {
         <div className="container mx-auto px-4 max-w-4xl">
           <div className="mb-8">
             <h1 className="text-4xl font-bold mb-2">Meu Perfil</h1>
-            <p className="text-muted-foreground">Gerencie sua conta e acompanhe seus pedidos</p>
+            <p className="text-foreground/70">Gerencie sua conta e acompanhe seus pedidos</p>
           </div>
 
           <Tabs defaultValue="perfil" className="w-full">
@@ -185,7 +185,7 @@ const Perfil = () => {
               <Card>
                 <CardHeader>
                   <CardTitle>Informações Pessoais</CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-foreground/70">
                     Visualize suas informações de conta
                   </CardDescription>
                 </CardHeader>
@@ -198,7 +198,7 @@ const Perfil = () => {
                       <h3 className="text-xl font-semibold">
                         {user.user_metadata?.name || 'Usuário'}
                       </h3>
-                      <p className="text-muted-foreground">{user.email}</p>
+                      <p className="text-foreground">{user.email}</p>
                     </div>
                   </div>
 
@@ -206,23 +206,23 @@ const Perfil = () => {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <Label className="text-sm text-muted-foreground">Nome</Label>
+                      <Label className="text-sm text-foreground/70">Nome</Label>
                       <p className="font-medium">
                         {user.user_metadata?.name || 'Não informado'}
                       </p>
                     </div>
                     <div>
-                      <Label className="text-sm text-muted-foreground">Email</Label>
+                      <Label className="text-sm text-foreground/70">Email</Label>
                       <p className="font-medium">{user.email}</p>
                     </div>
                     <div>
-                      <Label className="text-sm text-muted-foreground">ID do Usuário</Label>
-                      <p className="font-mono text-xs text-muted-foreground">
+                      <Label className="text-sm text-foreground/70">ID do Usuário</Label>
+                      <p className="font-mono text-xs text-foreground">
                         {user.id.slice(0, 8)}...
                       </p>
                     </div>
                     <div>
-                      <Label className="text-sm text-muted-foreground">Membro desde</Label>
+                      <Label className="text-sm text-foreground/70">Membro desde</Label>
                       <p className="font-medium">
                         {new Date(user.created_at).toLocaleDateString('pt-PT', {
                           day: '2-digit',
@@ -250,7 +250,7 @@ const Perfil = () => {
               <Card>
                 <CardHeader>
                   <CardTitle>Alterar Senha</CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-foreground/70">
                     Atualize sua senha para manter sua conta segura
                   </CardDescription>
                 </CardHeader>
@@ -291,15 +291,15 @@ const Perfil = () => {
               <Card>
                 <CardHeader>
                   <CardTitle>Meus Pedidos</CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-foreground/70">
                     Acompanhe seus pedidos recentes
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {orders.length === 0 ? (
                     <div className="text-center py-12">
-                      <Package className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
-                      <p className="text-muted-foreground mb-4">
+                      <Package className="h-16 w-16 mx-auto mb-4 text-foreground/50" />
+                      <p className="text-foreground/70 mb-4">
                         Você ainda não fez nenhum pedido
                       </p>
                       <Link to="/produtos">
@@ -318,7 +318,7 @@ const Perfil = () => {
                               <p className="font-semibold">
                                 Pedido #{order.id.slice(0, 8).toUpperCase()}
                               </p>
-                              <p className="text-sm text-muted-foreground">
+                              <p className="text-sm text-foreground/70">
                                 {new Date(order.created_at).toLocaleDateString('pt-PT', {
                                   day: '2-digit',
                                   month: '2-digit',

@@ -83,7 +83,7 @@ const Auth = () => {
         <Card className="w-full max-w-md">
           <CardHeader>
             <CardTitle>Bem-vindo à Chococlair</CardTitle>
-            <CardDescription>
+            <CardDescription className="text-foreground/70">
               Entre na sua conta ou crie uma nova para fazer pedidos
             </CardDescription>
           </CardHeader>

@@ -87,14 +87,14 @@ const Produtos = () => {
           <h1 className="text-4xl md:text-5xl font-bold text-center mb-4">
             Os Nossos Produtos
           </h1>
-          <p className="text-center text-muted-foreground mb-12 max-w-2xl mx-auto">
+          <p className="text-center text-foreground/70 mb-12 max-w-2xl mx-auto">
             Descubra a nossa seleção de doces artesanais premium, 
             feitos com ingredientes de qualidade superior
           </p>
 
           {loading ? (
             <div className="text-center py-20">
-              <p className="text-muted-foreground">A carregar produtos...</p>
+              <p className="text-foreground">A carregar produtos...</p>
             </div>
           ) : (
             <Tabs defaultValue="todos" className="w-full">
