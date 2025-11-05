@@ -216,18 +216,29 @@ serve(async (req) => {
 
     console.log('Método de pagamento:', paymentMethod);
 
+    // Calcular taxa de entrega
+    const deliveryFee = customerData.deliveryType === 'entrega' ? 1.5 : 0;
+    const subtotal = total;
+    const finalTotal = subtotal + deliveryFee;
+
+    console.log('Subtotal:', subtotal);
+    console.log('Delivery fee:', deliveryFee);
+    console.log('Total final:', finalTotal);
+
     // Criar pedido
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
-        user_id: userId,
         customer_name: customerData.name,
         customer_email: customerData.email,
         customer_phone: customerData.phone,
         delivery_type: customerData.deliveryType,
         delivery_address: customerData.deliveryAddress || null,
         payment_method: paymentMethod,
-        total,
+        subtotal: subtotal,
+        delivery_fee: deliveryFee,
+        total: finalTotal,
+        notes: customerData.notes || null,
         status: 'pendente',
       })
       .select()

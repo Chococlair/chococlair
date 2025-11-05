@@ -95,59 +95,50 @@ const Admin = () => {
     let currentOrdersCount = 0;
     let channel: any = null;
 
-    // Função para tocar notificação sonora (estilo Uber Eats - alto e chamativo)
+    // Função para tocar notificação sonora (estilo Uber Eats - longo e chamativo)
     const playNotificationSound = () => {
       try {
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const now = audioContext.currentTime;
         
-        // Primeiro bip (agudo)
-        const oscillator1 = audioContext.createOscillator();
-        const gainNode1 = audioContext.createGain();
-        oscillator1.connect(gainNode1);
-        gainNode1.connect(audioContext.destination);
+        // Primeira sequência: 3 notas ascendentes (estilo "novo pedido!")
+        const playNote = (frequency: number, startTime: number, duration: number, volume: number) => {
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          oscillator.frequency.value = frequency;
+          oscillator.type = 'sine';
+          
+          gainNode.gain.setValueAtTime(0, startTime);
+          gainNode.gain.linearRampToValueAtTime(volume, startTime + 0.05);
+          gainNode.gain.setValueAtTime(volume, startTime + duration - 0.05);
+          gainNode.gain.linearRampToValueAtTime(0, startTime + duration);
+          
+          oscillator.start(startTime);
+          oscillator.stop(startTime + duration);
+        };
         
-        oscillator1.frequency.value = 1000; // Hz - tom agudo
-        oscillator1.type = 'sine';
+        // Sequência 1: Notas ascendentes (800Hz -> 1000Hz -> 1200Hz)
+        playNote(800, now, 0.2, 0.6);
+        playNote(1000, now + 0.25, 0.2, 0.7);
+        playNote(1200, now + 0.5, 0.25, 0.8);
         
-        gainNode1.gain.setValueAtTime(0.5, audioContext.currentTime);
-        gainNode1.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+        // Pausa curta
+        const pauseTime = now + 0.85;
         
-        oscillator1.start(audioContext.currentTime);
-        oscillator1.stop(audioContext.currentTime + 0.15);
+        // Sequência 2: Nota longa e forte (estilo "atenção!")
+        playNote(1000, pauseTime, 0.4, 0.9);
+        playNote(800, pauseTime + 0.45, 0.35, 0.85);
         
-        // Segundo bip (mais agudo ainda) após um pequeno delay
-        setTimeout(() => {
-          const oscillator2 = audioContext.createOscillator();
-          const gainNode2 = audioContext.createGain();
-          oscillator2.connect(gainNode2);
-          gainNode2.connect(audioContext.destination);
-          
-          oscillator2.frequency.value = 1200; // Hz - ainda mais agudo
-          oscillator2.type = 'sine';
-          
-          gainNode2.gain.setValueAtTime(0.6, audioContext.currentTime);
-          gainNode2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
-          
-          oscillator2.start(audioContext.currentTime);
-          oscillator2.stop(audioContext.currentTime + 0.2);
-        }, 200);
-        
-        // Terceiro bip (mais longo e forte)
-        setTimeout(() => {
-          const oscillator3 = audioContext.createOscillator();
-          const gainNode3 = audioContext.createGain();
-          oscillator3.connect(gainNode3);
-          gainNode3.connect(audioContext.destination);
-          
-          oscillator3.frequency.value = 800; // Hz - tom médio
-          oscillator3.type = 'sine';
-          
-          gainNode3.gain.setValueAtTime(0.7, audioContext.currentTime);
-          gainNode3.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-          
-          oscillator3.start(audioContext.currentTime);
-          oscillator3.stop(audioContext.currentTime + 0.3);
-        }, 450);
+        // Sequência 3: Tremolo final (efeito de vibração)
+        const tremoloStart = pauseTime + 0.9;
+        for (let i = 0; i < 4; i++) {
+          const t = tremoloStart + (i * 0.15);
+          const freq = 900 + (i % 2 === 0 ? 200 : -200); // Alterna entre 1100Hz e 700Hz
+          playNote(freq, t, 0.1, 0.6 - (i * 0.1));
+        }
         
       } catch (error) {
         console.error('Erro ao tocar som de notificação:', error);
