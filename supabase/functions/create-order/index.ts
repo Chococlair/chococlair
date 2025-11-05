@@ -179,7 +179,8 @@ serve(async (req) => {
 
     if (orderError) {
       console.error('Error creating order:', orderError);
-      throw new Error('Failed to create order');
+      console.error('Order error details:', JSON.stringify(orderError, null, 2));
+      throw new Error(`Failed to create order: ${orderError.message || JSON.stringify(orderError)}`);
     }
 
     console.log('Order created:', order.id);

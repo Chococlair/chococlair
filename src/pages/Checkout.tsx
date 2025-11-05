@@ -98,17 +98,35 @@ const Checkout = () => {
 
       if (error) {
         console.error('Error creating order:', error);
+        console.error('Error details:', JSON.stringify(error, null, 2));
+        
         // Try to get error message from response
         let errorMessage = error.message || 'Erro ao criar pedido';
         if (error.context?.msg) {
           errorMessage = error.context.msg;
         }
+        
+        // Se houver data no erro, tentar pegar a mensagem de lá
+        if (error.context?.body) {
+          try {
+            const errorBody = typeof error.context.body === 'string' 
+              ? JSON.parse(error.context.body) 
+              : error.context.body;
+            if (errorBody.error) {
+              errorMessage = errorBody.error;
+            }
+          } catch (e) {
+            // Ignorar erro de parsing
+          }
+        }
+        
         throw new Error(errorMessage);
       }
 
       if (!data || !data.success) {
         const errorMsg = data?.error || 'Erro ao criar pedido';
         console.error('Order creation failed:', errorMsg);
+        console.error('Response data:', JSON.stringify(data, null, 2));
         throw new Error(errorMsg);
       }
 
