@@ -91,6 +91,7 @@ const Checkout = () => {
 
       console.log('Submitting order:', orderData);
       console.log('Payment method:', paymentMethod);
+      console.log('Payment method type:', typeof paymentMethod);
 
       // Call secure Edge Function
       const response = await supabase.functions.invoke('create-order', {
@@ -98,17 +99,23 @@ const Checkout = () => {
       });
 
       console.log('Full response:', response);
+      console.log('Response error:', response.error);
+      console.log('Response data:', response.data);
 
       if (response.error) {
-        console.error('Error creating order:', response.error);
+        console.error('❌ ERROR creating order:', response.error);
         console.error('Error details:', JSON.stringify(response.error, null, 2));
         
         // Try to get error message from response body
         let errorMessage = response.error.message || 'Erro ao criar pedido';
         
-        // Se houver response.data, pode conter o erro
-        if (response.data && response.data.error) {
-          errorMessage = response.data.error;
+        // Se houver response.data, pode conter o erro (às vezes o erro vem em data quando status é 400)
+        if (response.data) {
+          console.log('Response.data exists:', response.data);
+          if (response.data.error) {
+            errorMessage = response.data.error;
+            console.log('Error from response.data:', errorMessage);
+          }
         }
         
         throw new Error(errorMessage);

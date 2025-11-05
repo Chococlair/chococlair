@@ -95,90 +95,138 @@ const Admin = () => {
     let currentOrdersCount = 0;
     let channel: any = null;
 
-    // Função para tocar notificação sonora
+    // Função para tocar notificação sonora (estilo Uber Eats - alto e chamativo)
     const playNotificationSound = () => {
       try {
-        // Criar um contexto de áudio simples usando Web Audio API
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-
-        // Configurar frequência e duração (som de notificação agradável)
-        oscillator.frequency.value = 800; // Hz
-        oscillator.type = 'sine';
-
-        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-
-        oscillator.start(audioContext.currentTime);
-        oscillator.stop(audioContext.currentTime + 0.3);
+        
+        // Primeiro bip (agudo)
+        const oscillator1 = audioContext.createOscillator();
+        const gainNode1 = audioContext.createGain();
+        oscillator1.connect(gainNode1);
+        gainNode1.connect(audioContext.destination);
+        
+        oscillator1.frequency.value = 1000; // Hz - tom agudo
+        oscillator1.type = 'sine';
+        
+        gainNode1.gain.setValueAtTime(0.5, audioContext.currentTime);
+        gainNode1.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+        
+        oscillator1.start(audioContext.currentTime);
+        oscillator1.stop(audioContext.currentTime + 0.15);
+        
+        // Segundo bip (mais agudo ainda) após um pequeno delay
+        setTimeout(() => {
+          const oscillator2 = audioContext.createOscillator();
+          const gainNode2 = audioContext.createGain();
+          oscillator2.connect(gainNode2);
+          gainNode2.connect(audioContext.destination);
+          
+          oscillator2.frequency.value = 1200; // Hz - ainda mais agudo
+          oscillator2.type = 'sine';
+          
+          gainNode2.gain.setValueAtTime(0.6, audioContext.currentTime);
+          gainNode2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+          
+          oscillator2.start(audioContext.currentTime);
+          oscillator2.stop(audioContext.currentTime + 0.2);
+        }, 200);
+        
+        // Terceiro bip (mais longo e forte)
+        setTimeout(() => {
+          const oscillator3 = audioContext.createOscillator();
+          const gainNode3 = audioContext.createGain();
+          oscillator3.connect(gainNode3);
+          gainNode3.connect(audioContext.destination);
+          
+          oscillator3.frequency.value = 800; // Hz - tom médio
+          oscillator3.type = 'sine';
+          
+          gainNode3.gain.setValueAtTime(0.7, audioContext.currentTime);
+          gainNode3.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+          
+          oscillator3.start(audioContext.currentTime);
+          oscillator3.stop(audioContext.currentTime + 0.3);
+        }, 450);
+        
       } catch (error) {
         console.error('Erro ao tocar som de notificação:', error);
       }
     };
 
-    // Carregar pedidos primeiro
-    loadOrders().then((loadedOrders) => {
-      currentOrdersCount = loadedOrders.length;
-      setPreviousOrdersCount(loadedOrders.length);
-    });
-
     // Configurar subscription para mudanças na tabela orders
     channel = supabase
-      .channel(`orders_changes_${Date.now()}`) // Nome único para evitar conflitos
+      .channel(`orders_realtime_${Date.now()}`) // Nome único
       .on(
         'postgres_changes',
         {
-          event: '*', // Escutar todos os eventos (INSERT, UPDATE, DELETE)
+          event: 'INSERT', // Apenas INSERT para novos pedidos
           schema: 'public',
           table: 'orders',
         },
         async (payload: any) => {
-          console.log('🔔 Order change detected:', payload);
+          console.log('🔔🔔🔔 NOVO PEDIDO DETECTADO!', payload);
           console.log('Event type:', payload.eventType);
-          console.log('New data:', payload.new);
-          console.log('Old data:', payload.old);
+          console.log('New order:', payload.new);
+          
+          const newOrder = payload.new as Order;
+          
+          // Tocar som IMEDIATAMENTE
+          playNotificationSound();
+          
+          // Mostrar notificação grande e chamativa
+          toast.success(`🆕 NOVO PEDIDO!`, {
+            description: `Pedido #${newOrder.id.slice(0, 8).toUpperCase()}\n${newOrder.customer_name}\n${newOrder.total.toFixed(2)}€`,
+            duration: 8000,
+            style: {
+              fontSize: '18px',
+              fontWeight: 'bold',
+            },
+          });
           
           // Recarregar pedidos
-          const updatedOrders = await loadOrders();
-          
-          // Se for um INSERT (novo pedido), tocar som e mostrar notificação
-          if (payload.eventType === 'INSERT') {
-            const newOrder = payload.new as Order;
-            console.log('🆕 New order received:', newOrder);
-            
-            // Comparar contagem para garantir que é realmente um novo pedido
-            if (updatedOrders.length > currentOrdersCount) {
-              currentOrdersCount = updatedOrders.length;
-              
-              // Tocar som e mostrar notificação
-              setTimeout(() => {
-                playNotificationSound();
-                toast.success(`Novo pedido recebido!`, {
-                  description: `Pedido #${newOrder.id.slice(0, 8).toUpperCase()} - ${newOrder.customer_name} - ${newOrder.total.toFixed(2)}€`,
-                  duration: 5000,
-                });
-              }, 300);
-            }
-          } else if (payload.eventType === 'UPDATE') {
-            console.log('🔄 Order updated');
-            currentOrdersCount = updatedOrders.length;
-          } else if (payload.eventType === 'DELETE') {
-            console.log('🗑️ Order deleted');
-            currentOrdersCount = updatedOrders.length;
-          }
+          await loadOrders();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'orders',
+        },
+        async () => {
+          console.log('🔄 Order updated');
+          await loadOrders();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'orders',
+        },
+        async () => {
+          console.log('🗑️ Order deleted');
+          await loadOrders();
         }
       )
       .subscribe((status: string) => {
-        console.log('📡 Realtime subscription status:', status);
+        console.log('📡📡📡 REALTIME SUBSCRIPTION STATUS:', status);
         if (status === 'SUBSCRIBED') {
-          console.log('✅ Successfully subscribed to orders changes');
+          console.log('✅✅✅ REALTIME ATIVO - Aguardando novos pedidos...');
+          toast.success('Conexão em tempo real ativa!', { duration: 2000 });
+          
+          // Carregar pedidos após subscription estar ativa
+          loadOrders().then((loadedOrders) => {
+            currentOrdersCount = loadedOrders.length;
+            setPreviousOrdersCount(loadedOrders.length);
+            console.log(`Pedidos carregados: ${loadedOrders.length}`);
+          });
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          console.error('❌ Error subscribing to orders changes:', status);
-          toast.error('Erro na conexão em tempo real. Recarregue a página.');
+          console.error('❌❌❌ ERRO NO REALTIME:', status);
+          toast.error('Erro na conexão em tempo real. Recarregue a página.', { duration: 5000 });
         } else {
           console.log('⏳ Subscription status:', status);
         }

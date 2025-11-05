@@ -7,18 +7,38 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
+  console.log('=== EDGE FUNCTION CHAMADA ===');
+  console.log('Method:', req.method);
+  console.log('URL:', req.url);
+  
   if (req.method === 'OPTIONS') {
+    console.log('OPTIONS request - returning CORS headers');
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    console.log('Iniciando processamento do pedido...');
+    
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    
+    console.log('Supabase URL:', supabaseUrl ? 'Definido' : 'NÃO DEFINIDO');
+    console.log('Supabase Key:', supabaseKey ? 'Definido' : 'NÃO DEFINIDO');
+    
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('❌ Variáveis de ambiente não configuradas!');
+      throw new Error('Supabase configuration missing');
+    }
+    
     const supabase = createClient(supabaseUrl, supabaseKey);
+    console.log('Cliente Supabase criado');
 
     // Get JWT from Authorization header
     const authHeader = req.headers.get('Authorization');
+    console.log('Authorization header:', authHeader ? 'Presente' : 'AUSENTE');
+    
     if (!authHeader) {
+      console.error('❌ No authorization header provided');
       throw new Error('No authorization header');
     }
 
@@ -31,10 +51,15 @@ serve(async (req) => {
       throw new Error('Unauthorized');
     }
 
-    const { items, customerData } = await req.json();
-
+    const body = await req.json();
+    console.log('Request body recebido:', JSON.stringify(body, null, 2));
+    
+    const { items, customerData } = body;
+    
+    console.log('Items:', items);
+    console.log('Customer data:', customerData);
     console.log('Creating order for user:', user.id);
-    console.log('Cart items:', items);
+    console.log('User email:', user.email);
 
     // Validate input
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -227,9 +252,16 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('Error in create-order function:', error);
+    console.error('❌❌❌ ERRO NA EDGE FUNCTION ❌❌❌');
+    console.error('Error type:', error?.constructor?.name);
+    console.error('Error message:', error instanceof Error ? error.message : 'Unknown error');
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
+    console.error('Full error object:', JSON.stringify(error, null, 2));
+    
     const errorMessage = error instanceof Error ? error.message : 'An error occurred';
-    console.error('Error details:', error);
+    
+    console.error('Retornando erro para o cliente:', errorMessage);
+    
     return new Response(
       JSON.stringify({ 
         success: false, 
