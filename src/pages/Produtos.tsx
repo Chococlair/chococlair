@@ -4,7 +4,7 @@ import { Footer } from "@/components/Footer";
 import { ProductCard } from "@/components/ProductCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
-import { getCart, getCartItemsCount } from "@/lib/cart";
+import { getCart, getCartItemsCount, validateCartProducts } from "@/lib/cart";
 import { toast } from "sonner";
 
 interface Product {
@@ -46,6 +46,26 @@ const Produtos = () => {
 
       if (error) throw error;
       setProducts(data || []);
+
+      // Validar carrinho contra produtos disponíveis
+      if (data && data.length > 0) {
+        const productIds = data.map(p => p.id);
+        const validationResult = await validateCartProducts(productIds);
+        
+        // Se a validação retornou um objeto com removedItems, significa que itens foram removidos
+        if (validationResult && typeof validationResult === 'object' && 'removedItems' in validationResult) {
+          const removedItems = (validationResult as any).removedItems as string[];
+          if (removedItems.length > 0) {
+            toast.warning(
+              `${removedItems.length} produto(s) removido(s) do carrinho porque não estão mais disponíveis.`,
+              { duration: 5000 }
+            );
+            setCartCount(getCartItemsCount((validationResult as any).validCart));
+          }
+        } else {
+          setCartCount(getCartItemsCount(getCart()));
+        }
+      }
     } catch (error) {
       console.error('Erro ao carregar produtos:', error);
       toast.error('Erro ao carregar produtos');

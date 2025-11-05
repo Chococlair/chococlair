@@ -12,9 +12,12 @@ import {
   getCartTotal, 
   updateCartItemQuantity, 
   removeFromCart,
+  clearCart,
+  validateCartProducts,
   CartItem 
 } from "@/lib/cart";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 const Carrinho = () => {
   const navigate = useNavigate();
@@ -22,7 +25,7 @@ const Carrinho = () => {
   const [cartCount, setCartCount] = useState(0);
 
   useEffect(() => {
-    loadCart();
+    loadCartAndValidate();
     
     const handleCartUpdate = () => {
       loadCart();
@@ -36,6 +39,41 @@ const Carrinho = () => {
     const currentCart = getCart();
     setCart(currentCart);
     setCartCount(getCartItemsCount(currentCart));
+  };
+
+  const loadCartAndValidate = async () => {
+    // Primeiro, validar produtos do carrinho
+    try {
+      const { data: products } = await supabase
+        .from('products')
+        .select('id')
+        .eq('available', true);
+
+      if (products && products.length > 0) {
+        const productIds = products.map(p => p.id);
+        const validationResult = await validateCartProducts(productIds);
+        
+        if (validationResult && typeof validationResult === 'object' && 'removedItems' in validationResult) {
+          const removedItems = (validationResult as any).removedItems as string[];
+          if (removedItems.length > 0) {
+            toast.warning(
+              `${removedItems.length} produto(s) removido(s) do carrinho porque não estão mais disponíveis.`,
+              { duration: 5000 }
+            );
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao validar carrinho:', error);
+    }
+    
+    loadCart();
+  };
+
+  const handleClearCart = () => {
+    clearCart();
+    toast.success('Carrinho limpo');
+    loadCart();
   };
 
   const handleUpdateQuantity = (itemId: string, newQuantity: number) => {
@@ -78,12 +116,19 @@ const Carrinho = () => {
         <div className="container mx-auto px-4 max-w-4xl">
           <div className="flex items-center justify-between mb-8">
             <h1 className="text-3xl md:text-4xl font-bold">Carrinho de Compras</h1>
-            <Link to="/produtos">
-              <Button variant="ghost">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Continuar a Comprar
-              </Button>
-            </Link>
+            <div className="flex gap-2">
+              {!isEmpty && (
+                <Button variant="outline" onClick={handleClearCart}>
+                  Limpar Carrinho
+                </Button>
+              )}
+              <Link to="/produtos">
+                <Button variant="ghost">
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Continuar a Comprar
+                </Button>
+              </Link>
+            </div>
           </div>
 
           {isEmpty ? (

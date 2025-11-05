@@ -82,3 +82,43 @@ export const getCartTotal = (cart: CartItem[]) => {
 export const getCartItemsCount = (cart: CartItem[]) => {
   return cart.reduce((sum, item) => sum + item.quantity, 0);
 };
+
+/**
+ * Valida produtos do carrinho contra a lista de produtos disponíveis
+ * Remove produtos que não existem mais no banco
+ */
+export const validateCartProducts = async (availableProductIds: string[]): Promise<CartItem[] | { validCart: CartItem[]; removedItems: string[] }> => {
+  const cart = getCart();
+  const validCart: CartItem[] = [];
+  const removedItems: string[] = [];
+
+  for (const item of cart) {
+    // Verificar se o productId principal existe
+    let isValid = availableProductIds.includes(item.productId);
+    
+    // Para éclairs, verificar também os IDs dos sabores
+    if (item.category === 'eclair' && item.options?.flavors) {
+      const allFlavorsValid = item.options.flavors.every((flavorId: string) => 
+        availableProductIds.includes(flavorId)
+      );
+      isValid = isValid && allFlavorsValid;
+    }
+
+    if (isValid) {
+      validCart.push(item);
+    } else {
+      removedItems.push(item.name);
+    }
+  }
+
+  // Se algum item foi removido, atualizar o carrinho
+  if (removedItems.length > 0) {
+    saveCart(validCart);
+    window.dispatchEvent(new CustomEvent('cart-updated'));
+    
+    // Retornar objeto com itens removidos para notificar o usuário
+    return { validCart, removedItems };
+  }
+
+  return validCart;
+};

@@ -126,22 +126,39 @@ serve(async (req) => {
     const productMap = new Map(products?.map(p => [p.id, p]) || []);
 
     // Validar todos os produtos existem
+    const missingProducts: string[] = [];
+    const unavailableProducts: string[] = [];
+    
     for (const productId of allProductIds) {
       const product = productMap.get(productId);
       if (!product) {
         console.error('Produto não encontrado:', productId);
-        return new Response(
-          JSON.stringify({ success: false, error: `Product not found: ${productId}` }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-        );
+        missingProducts.push(productId);
+      } else if (!product.available) {
+        console.error('Produto não disponível:', productId, product.name);
+        unavailableProducts.push(product.name);
       }
-      if (!product.available) {
-        console.error('Produto não disponível:', productId);
-        return new Response(
-          JSON.stringify({ success: false, error: `Product not available: ${product.name}` }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
-        );
-      }
+    }
+
+    if (missingProducts.length > 0) {
+      console.error('Produtos faltando:', missingProducts);
+      console.error('Produtos encontrados no banco:', Array.from(productMap.keys()));
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: `Product not found: ${missingProducts[0]}`,
+          missingProducts,
+          availableProductIds: Array.from(productMap.keys())
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+      );
+    }
+
+    if (unavailableProducts.length > 0) {
+      return new Response(
+        JSON.stringify({ success: false, error: `Product not available: ${unavailableProducts[0]}` }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+      );
     }
 
     // Calcular total
