@@ -94,27 +94,45 @@ const Checkout = () => {
       console.log('Payment method type:', typeof paymentMethod);
 
       // Call secure Edge Function
+      console.log('📤 Chamando Edge Function...');
+      
       const response = await supabase.functions.invoke('create-order', {
         body: orderData,
       });
 
-      console.log('Full response:', response);
+      console.log('📥 Full response:', response);
       console.log('Response error:', response.error);
       console.log('Response data:', response.data);
 
-      if (response.error) {
+      // Se houver erro OU se response.data for null mas status for 400, tentar ler o body
+      if (response.error || (response.data === null && response.error)) {
         console.error('❌ ERROR creating order:', response.error);
         console.error('Error details:', JSON.stringify(response.error, null, 2));
         
-        // Try to get error message from response body
-        let errorMessage = response.error.message || 'Erro ao criar pedido';
+        // Tentar ler o body da resposta se houver
+        let errorMessage = response.error?.message || 'Erro ao criar pedido';
         
-        // Se houver response.data, pode conter o erro (às vezes o erro vem em data quando status é 400)
-        if (response.data) {
-          console.log('Response.data exists:', response.data);
-          if (response.data.error) {
-            errorMessage = response.data.error;
-            console.log('Error from response.data:', errorMessage);
+        // Se response.data existe mas tem erro dentro
+        if (response.data && typeof response.data === 'object' && 'error' in response.data) {
+          errorMessage = response.data.error;
+          console.log('Error from response.data:', errorMessage);
+        }
+        
+        // Se response.error tem context, tentar ler de lá
+        if (response.error?.context) {
+          console.log('Error context:', response.error.context);
+          try {
+            const contextError = response.error.context;
+            if (contextError.body) {
+              const bodyError = typeof contextError.body === 'string' 
+                ? JSON.parse(contextError.body) 
+                : contextError.body;
+              if (bodyError?.error) {
+                errorMessage = bodyError.error;
+              }
+            }
+          } catch (e) {
+            console.error('Error parsing context:', e);
           }
         }
         

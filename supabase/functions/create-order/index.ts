@@ -43,13 +43,22 @@ serve(async (req) => {
     }
 
     // Verify user is authenticated
+    console.log('Verificando autenticação do usuário...');
     const { data: { user }, error: userError } = await supabase.auth.getUser(
       authHeader.replace('Bearer ', '')
     );
 
-    if (userError || !user) {
-      throw new Error('Unauthorized');
+    if (userError) {
+      console.error('❌ Erro ao verificar usuário:', userError);
+      throw new Error(`Unauthorized: ${userError.message}`);
     }
+
+    if (!user) {
+      console.error('❌ Usuário não encontrado');
+      throw new Error('Unauthorized: User not found');
+    }
+
+    console.log('✅ Usuário autenticado:', user.email);
 
     const body = await req.json();
     console.log('Request body recebido:', JSON.stringify(body, null, 2));
