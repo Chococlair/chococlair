@@ -46,17 +46,24 @@ const Produto = () => {
 
   const loadProduct = async (productId: string) => {
     try {
+      // @ts-ignore - Tipos do Supabase serão gerados automaticamente
       const { data, error } = await supabase
+        // @ts-ignore
         .from('products')
         .select('*')
         .eq('id', productId)
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data) {
+        toast.error('Produto não encontrado');
+        navigate('/produtos');
+        return;
+      }
       setProduct(data);
     } catch (error) {
       console.error('Erro ao carregar produto:', error);
-      toast.error('Produto não encontrado');
+      toast.error('Erro ao carregar produto');
       navigate('/produtos');
     } finally {
       setLoading(false);

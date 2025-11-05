@@ -18,9 +18,9 @@ export const Header = ({ cartItemsCount = 0 }: HeaderProps) => {
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <Link to="/" className="flex items-center space-x-1">
-            <span className="font-leckerli text-4xl text-primary">C</span>
-            <span className="font-aoboshi text-3xl text-primary">hococlair</span>
+          <Link to="/" className="flex items-baseline space-x-0">
+            <span className="font-leckerli text-4xl text-primary leading-none">C</span>
+            <span className="font-aoboshi text-3xl text-primary leading-none">hococlair</span>
           </Link>
 
           {/* Navigation */}

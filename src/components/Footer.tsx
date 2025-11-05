@@ -8,9 +8,9 @@ export const Footer = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {/* Sobre */}
           <div>
-            <div className="flex items-center space-x-1 mb-4">
-              <span className="font-leckerli text-3xl">C</span>
-              <span className="font-aoboshi text-2xl">hococlair</span>
+            <div className="flex items-baseline space-x-0 mb-4">
+              <span className="font-leckerli text-3xl leading-none">C</span>
+              <span className="font-aoboshi text-2xl leading-none">hococlair</span>
             </div>
             <p className="text-sm text-primary-foreground/80">
               Confeitaria artesanal premium, especializada em éclairs, chocotones e rocamboles com sabores exclusivos.

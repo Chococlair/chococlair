@@ -29,9 +29,9 @@ const Index = () => {
         <section className="relative bg-gradient-to-b from-background to-secondary/10 py-20 md:py-32">
           <div className="container mx-auto px-4">
             <div className="max-w-3xl mx-auto text-center">
-              <h1 className="mb-6">
-                <span className="font-leckerli text-6xl md:text-8xl text-primary block">C</span>
-                <span className="font-aoboshi text-5xl md:text-7xl text-primary">hococlair</span>
+              <h1 className="mb-6 flex items-baseline justify-center">
+                <span className="font-leckerli text-6xl md:text-8xl text-primary leading-none">C</span>
+                <span className="font-aoboshi text-5xl md:text-7xl text-primary leading-none">hococlair</span>
               </h1>
               <p className="text-xl md:text-2xl text-muted-foreground mb-8">
                 Confeitaria Artesanal Premium
@@ -83,65 +83,6 @@ const Index = () => {
                   Produtos preparados diariamente para garantir o máximo de frescura
                 </p>
               </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Categories Preview */}
-        <section className="py-16">
-          <div className="container mx-auto px-4">
-            <h2 className="text-3xl md:text-4xl font-bold text-center mb-12">
-              As Nossas Especialidades
-            </h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="group relative overflow-hidden rounded-lg shadow-lg hover:shadow-xl transition-shadow">
-                <div className="aspect-square bg-primary/5 flex items-center justify-center text-8xl">
-                  🥖
-                </div>
-                <div className="p-6 bg-card">
-                  <h3 className="text-2xl font-bold mb-2">Éclairs</h3>
-                  <p className="text-muted-foreground mb-4">
-                    Éclairs artesanais com recheios cremosos e sabores irresistíveis
-                  </p>
-                  <p className="text-primary font-semibold">A partir de 3,50€</p>
-                </div>
-              </div>
-
-              <div className="group relative overflow-hidden rounded-lg shadow-lg hover:shadow-xl transition-shadow">
-                <div className="aspect-square bg-accent/5 flex items-center justify-center text-8xl">
-                  🎂
-                </div>
-                <div className="p-6 bg-card">
-                  <h3 className="text-2xl font-bold mb-2">Chocotones</h3>
-                  <p className="text-muted-foreground mb-4">
-                    Chocotones recheados com sabores exclusivos e surpreendentes
-                  </p>
-                  <p className="text-accent font-semibold">25,00€</p>
-                </div>
-              </div>
-
-              <div className="group relative overflow-hidden rounded-lg shadow-lg hover:shadow-xl transition-shadow">
-                <div className="aspect-square bg-secondary/5 flex items-center justify-center text-8xl">
-                  🍰
-                </div>
-                <div className="p-6 bg-card">
-                  <h3 className="text-2xl font-bold mb-2">Rocamboles</h3>
-                  <p className="text-muted-foreground mb-4">
-                    Rocamboles macios com recheios cremosos de dar água na boca
-                  </p>
-                  <p className="text-secondary font-semibold">15,00€</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="text-center mt-12">
-              <Link to="/produtos">
-                <Button size="lg" variant="outline" className="gap-2">
-                  Ver Todos os Produtos
-                  <ArrowRight className="h-5 w-5" />
-                </Button>
-              </Link>
             </div>
           </div>
         </section>

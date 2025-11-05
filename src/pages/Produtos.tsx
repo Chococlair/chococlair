@@ -35,7 +35,9 @@ const Produtos = () => {
 
   const loadProducts = async () => {
     try {
+      // @ts-ignore - Tipos do Supabase serão gerados automaticamente
       const { data, error } = await supabase
+        // @ts-ignore
         .from('products')
         .select('*')
         .eq('available', true)
