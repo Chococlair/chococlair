@@ -318,57 +318,27 @@ const Admin = () => {
     try {
       console.log('Deleting order:', orderToDelete.id);
 
-      // Deletar o pedido (o CASCADE vai deletar os itens automaticamente)
-      // Primeiro, verificar se temos permissão de admin
-      const { data: adminCheck } = await supabase.rpc('is_admin');
-      console.log('Admin check before delete:', adminCheck);
+      // Usar função RPC para deletar (bypassa problemas de RLS)
+      console.log('Chamando função RPC para deletar pedido:', orderToDelete.id);
       
-      if (!adminCheck) {
-        throw new Error('Você não tem permissão de admin para deletar pedidos.');
+      const { data: deleted, error: rpcError } = await supabase
+        .rpc('delete_order', { order_id: orderToDelete.id });
+
+      console.log('Delete RPC result:', { deleted, rpcError });
+
+      if (rpcError) {
+        console.error('❌ Error deleting order via RPC:', rpcError);
+        console.error('Error code:', rpcError.code);
+        console.error('Error message:', rpcError.message);
+        console.error('Error details:', JSON.stringify(rpcError, null, 2));
+        throw new Error(`Erro ao excluir pedido: ${rpcError.message || 'Erro desconhecido'}`);
       }
 
-      const { data: deletedData, error: orderError } = await supabase
-        .from('orders')
-        .delete()
-        .eq('id', orderToDelete.id)
-        .select();
-
-      console.log('Delete result:', { deletedData, orderError });
-
-      if (orderError) {
-        console.error('❌ Error deleting order:', orderError);
-        console.error('Error code:', orderError.code);
-        console.error('Error message:', orderError.message);
-        console.error('Error details:', JSON.stringify(orderError, null, 2));
-        console.error('Error hint:', orderError.hint);
-        
-        // Verificar se é erro de permissão
-        if (orderError.code === '42501' || orderError.message?.includes('permission') || orderError.message?.includes('policy')) {
-          throw new Error('Você não tem permissão para deletar pedidos. A política RLS pode estar bloqueando. Verifique se você é admin.');
-        }
-        
-        throw new Error(`Erro ao excluir pedido: ${orderError.message || 'Erro desconhecido'}`);
+      if (!deleted) {
+        throw new Error('Pedido não foi deletado. Verifique se o pedido existe e se você tem permissão de admin.');
       }
 
-      // Se não retornou dados mas também não retornou erro, pode ter deletado mas não retornar dados por causa do RLS
-      // Vamos verificar se o pedido ainda existe
-      if (!deletedData || deletedData.length === 0) {
-        console.warn('⚠️ Delete não retornou dados. Verificando se pedido ainda existe...');
-        const { data: checkOrder } = await supabase
-          .from('orders')
-          .select('id')
-          .eq('id', orderToDelete.id)
-          .single();
-        
-        if (checkOrder) {
-          throw new Error('Pedido não foi deletado. Verifique se a política RLS permite DELETE.');
-        } else {
-          // Pedido foi deletado mas não retornou dados (normal com RLS)
-          console.log('✅ Pedido deletado (verificado que não existe mais)');
-        }
-      } else {
-        console.log('✅ Order deleted successfully:', deletedData);
-      }
+      console.log('✅ Pedido deletado com sucesso via RPC');
 
       toast.success("Pedido excluído com sucesso");
       setOrderToDelete(null);

@@ -96,68 +96,74 @@ const Checkout = () => {
       // Call secure Edge Function
       console.log('📤 Chamando Edge Function...');
       
-      const response = await supabase.functions.invoke('create-order', {
-        body: orderData,
-      });
+      try {
+        const response = await supabase.functions.invoke('create-order', {
+          body: orderData,
+        });
 
-      console.log('📥 Full response:', response);
-      console.log('Response error:', response.error);
-      console.log('Response data:', response.data);
+        console.log('📥 Full response:', response);
+        console.log('Response error:', response.error);
+        console.log('Response data:', response.data);
 
-      // Se houver erro OU se response.data for null mas status for 400, tentar ler o body
-      if (response.error || (response.data === null && response.error)) {
-        console.error('❌ ERROR creating order:', response.error);
-        console.error('Error details:', JSON.stringify(response.error, null, 2));
-        
-        // Tentar ler o body da resposta se houver
-        let errorMessage = response.error?.message || 'Erro ao criar pedido';
-        
-        // Se response.data existe mas tem erro dentro
-        if (response.data && typeof response.data === 'object' && 'error' in response.data) {
-          errorMessage = response.data.error;
-          console.log('Error from response.data:', errorMessage);
-        }
-        
-        // Se response.error tem context, tentar ler de lá
-        if (response.error?.context) {
-          console.log('Error context:', response.error.context);
+        // Se houver erro, tentar ler o body da resposta HTTP diretamente
+        if (response.error) {
+          console.error('❌ ERROR creating order:', response.error);
+          
+          // Tentar ler o body da resposta HTTP diretamente
+          let errorMessage = 'Erro ao criar pedido';
+          
           try {
-            const contextError = response.error.context;
-            if (contextError.body) {
-              const bodyError = typeof contextError.body === 'string' 
-                ? JSON.parse(contextError.body) 
-                : contextError.body;
-              if (bodyError?.error) {
-                errorMessage = bodyError.error;
+            // Se response.error tem uma propriedade response, tentar ler o body
+            if (response.error.context?.response) {
+              const responseBody = await response.error.context.response.text();
+              console.log('Response body from error:', responseBody);
+              try {
+                const parsedBody = JSON.parse(responseBody);
+                if (parsedBody.error) {
+                  errorMessage = parsedBody.error;
+                  console.log('Error message from body:', errorMessage);
+                }
+              } catch (e) {
+                console.error('Error parsing response body:', e);
               }
             }
           } catch (e) {
-            console.error('Error parsing context:', e);
+            console.error('Error reading response body:', e);
           }
+          
+          // Fallback para outras fontes de erro
+          if (response.data && typeof response.data === 'object' && 'error' in response.data) {
+            errorMessage = response.data.error;
+          } else if (response.error.message) {
+            errorMessage = response.error.message;
+          }
+          
+          throw new Error(errorMessage);
         }
-        
-        throw new Error(errorMessage);
+
+        const data = response.data;
+
+        if (!data || !data.success) {
+          const errorMsg = data?.error || 'Erro ao criar pedido';
+          console.error('Order creation failed:', errorMsg);
+          console.error('Response data:', JSON.stringify(data, null, 2));
+          throw new Error(errorMsg);
+        }
+
+        console.log('Order created successfully:', data);
+
+        // Clear cart
+        clearCart();
+
+        toast.success("Pedido realizado com sucesso!");
+        // Redirecionar para página de acompanhamento
+        navigate(`/pedido/${data.orderId}`);
+      } catch (error: any) {
+        console.error('Checkout error:', error);
+        toast.error(error.message || "Erro ao finalizar pedido");
       }
-
-      const data = response.data;
-
-      if (!data || !data.success) {
-        const errorMsg = data?.error || 'Erro ao criar pedido';
-        console.error('Order creation failed:', errorMsg);
-        console.error('Response data:', JSON.stringify(data, null, 2));
-        throw new Error(errorMsg);
-      }
-
-      console.log('Order created successfully:', data);
-
-      // Clear cart
-      clearCart();
-
-      toast.success("Pedido realizado com sucesso!");
-      // Redirecionar para página de acompanhamento
-      navigate(`/pedido/${data.orderId}`);
     } catch (error: any) {
-      console.error('Checkout error:', error);
+      console.error('Checkout error (outer):', error);
       toast.error(error.message || "Erro ao finalizar pedido");
     } finally {
       setLoading(false);
