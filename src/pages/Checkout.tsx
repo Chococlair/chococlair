@@ -111,28 +111,53 @@ const Checkout = () => {
         console.log('Session token presente:', !!session.access_token);
         console.log('Session token length:', session.access_token?.length || 0);
         
-        // Chamar Edge Function usando o cliente Supabase
-        const { data, error } = await supabase.functions.invoke('create-order', {
-          body: orderData,
+        // Chamar Edge Function usando fetch para ter acesso completo à resposta
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const functionUrl = `${supabaseUrl}/functions/v1/create-order`;
+        
+        console.log('📤 Chamando:', functionUrl);
+        
+        const response = await fetch(functionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '',
+          },
+          body: JSON.stringify(orderData),
         });
 
-        console.log('📥 Edge Function response:', data);
-        console.log('📥 Edge Function error:', error);
+        console.log('📥 Response status:', response.status);
+        console.log('📥 Response ok:', response.ok);
+        console.log('📥 Response headers:', Object.fromEntries(response.headers.entries()));
 
-        if (error) {
-          console.error('❌ ERROR creating order:', error);
-          console.error('Error message:', error.message);
-          console.error('Error context:', error.context);
-          throw new Error(error.message || 'Erro ao criar pedido');
+        let responseData;
+        try {
+          const text = await response.text();
+          console.log('📥 Response text (raw):', text);
+          responseData = text ? JSON.parse(text) : null;
+          console.log('📥 Response data (parsed):', responseData);
+        } catch (e) {
+          console.error('Erro ao parsear resposta:', e);
+          throw new Error('Erro ao processar resposta do servidor');
         }
 
-        if (!data || !data.success) {
-          const errorMsg = data?.error || 'Erro ao criar pedido';
-          console.error('Order creation failed:', errorMsg);
+        if (!response.ok) {
+          const errorMsg = responseData?.error || `Erro ${response.status}: ${response.statusText}`;
+          console.error('❌ ERROR:', errorMsg);
+          console.error('Full response:', responseData);
           throw new Error(errorMsg);
         }
 
-        console.log('Order created successfully:', data);
+        if (!responseData || !responseData.success) {
+          const errorMsg = responseData?.error || 'Erro ao criar pedido';
+          console.error('Order creation failed:', errorMsg);
+          throw new Error(errorMsg);
+        }
+        
+        const data = responseData;
+
+        console.log('✅ Order created successfully:', data);
 
         // Clear cart
         clearCart();
