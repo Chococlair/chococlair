@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowLeft, ShoppingCart, Minus, Plus, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, ShoppingCart, Minus, Plus, CheckCircle2, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { getCart, getCartItemsCount, addToCart } from "@/lib/cart";
 import { toast } from "sonner";
@@ -112,20 +112,21 @@ const Produto = () => {
     }
   };
 
-  const handleFlavorToggle = (flavorId: string) => {
+  const handleFlavorAdd = (flavorId: string) => {
     const size = parseInt(boxSize);
-    const index = selectedFlavors.indexOf(flavorId);
-    
-    if (index > -1) {
-      // Remover sabor
-      setSelectedFlavors(selectedFlavors.filter(id => id !== flavorId));
+    if (selectedFlavors.length < size) {
+      setSelectedFlavors([...selectedFlavors, flavorId]);
     } else {
-      // Adicionar sabor (se ainda não atingiu o limite)
-      if (selectedFlavors.length < size) {
-        setSelectedFlavors([...selectedFlavors, flavorId]);
-      } else {
-        toast.error(`Selecione apenas ${size} sabores para uma caixa de ${size} unidades`);
-      }
+      toast.error(`Selecione apenas ${size} sabores para uma caixa de ${size} unidades`);
+    }
+  };
+
+  const handleFlavorRemove = (flavorId: string) => {
+    const lastIndex = selectedFlavors.lastIndexOf(flavorId);
+    if (lastIndex > -1) {
+      const newFlavors = [...selectedFlavors];
+      newFlavors.splice(lastIndex, 1);
+      setSelectedFlavors(newFlavors);
     }
   };
 
@@ -293,23 +294,44 @@ const Produto = () => {
                         <p className="text-sm text-foreground/70">A carregar sabores...</p>
                       ) : (
                         allEclairs.map((eclair) => {
-                          const isSelected = selectedFlavors.includes(eclair.id);
-                          const isDisabled = !isSelected && selectedFlavors.length >= parseInt(boxSize);
+                          // Contar quantas vezes este sabor está selecionado
+                          const count = selectedFlavors.filter(id => id === eclair.id).length;
+                          const canAdd = selectedFlavors.length < parseInt(boxSize);
                           
                           return (
-                            <div key={eclair.id} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`flavor-${eclair.id}`}
-                                checked={isSelected}
-                                disabled={isDisabled}
-                                onCheckedChange={() => handleFlavorToggle(eclair.id)}
-                              />
-                              <Label
-                                htmlFor={`flavor-${eclair.id}`}
-                                className={`cursor-pointer flex-1 ${isDisabled ? 'opacity-50' : ''}`}
-                              >
+                            <div key={eclair.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                              <Label className="flex-1 cursor-pointer">
                                 {eclair.name}
                               </Label>
+                              <div className="flex items-center gap-2">
+                                {count > 0 && (
+                                  <span className="text-sm font-semibold text-primary min-w-[2rem] text-center">
+                                    {count}
+                                  </span>
+                                )}
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => handleFlavorRemove(eclair.id)}
+                                    disabled={count === 0}
+                                  >
+                                    <Minus className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => handleFlavorAdd(eclair.id)}
+                                    disabled={!canAdd}
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
                             </div>
                           );
                         })
