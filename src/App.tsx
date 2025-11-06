@@ -13,6 +13,7 @@ import Admin from "./pages/Admin";
 import PedidoTracking from "./pages/PedidoTracking";
 import Perfil from "./pages/Perfil";
 import NotFound from "./pages/NotFound";
+import { AddToHomeScreenTutorial } from "./components/AddToHomeScreenTutorial";
 
 const queryClient = new QueryClient();
 
@@ -21,6 +22,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      <AddToHomeScreenTutorial />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
