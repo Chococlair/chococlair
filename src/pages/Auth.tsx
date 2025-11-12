@@ -48,8 +48,9 @@ const Auth = () => {
       setEmail("");
       setPassword("");
       setName("");
-    } catch (error: any) {
-      toast.error(error.message || "Erro ao criar conta");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro ao criar conta";
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -69,8 +70,9 @@ const Auth = () => {
 
       toast.success("Login realizado com sucesso!");
       navigate("/");
-    } catch (error: any) {
-      toast.error(error.message || "Erro ao fazer login");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro ao fazer login";
+      toast.error(message);
     } finally {
       setLoading(false);
     }

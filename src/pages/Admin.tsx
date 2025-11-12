@@ -1,12 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import type { ComponentType } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { LogOut, Package, Euro, Truck, CheckCircle, Clock, TrendingUp, Calendar, DollarSign, ShoppingBag, Filter, Trash2, Eye } from "lucide-react";
+import { LogOut, Package, Euro, Truck, CheckCircle, Clock, TrendingUp, Calendar, DollarSign, ShoppingBag, Filter, Trash2, Eye, Gift } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -38,12 +41,15 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from "recharts";
+import type { RealtimeChannel, RealtimePostgresInsertPayload } from "@supabase/supabase-js";
+import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface Order {
   id: string;
@@ -59,6 +65,7 @@ interface Order {
   status: string;
   created_at: string;
   notes: string | null;
+  scheduled_for?: string | null;
 }
 
 interface OrderItem {
@@ -67,8 +74,125 @@ interface OrderItem {
   quantity: number;
   unit_price: number;
   total_price: number;
-  options: any;
+  options: Record<string, unknown> | null;
 }
+
+interface OrderItemRow {
+  order_id: string;
+  product_name: string;
+  quantity: number;
+  total_price: number;
+}
+
+interface ProductAggregate {
+  product_name: string;
+  quantity: number;
+  revenue: number;
+}
+
+interface OrdersPerDaySummary {
+  date: string;
+  totalOrders: number;
+  natalOrders: number;
+  regularOrders: number;
+  totalValue: number;
+}
+
+type PromotionDiscountType = "percentage" | "fixed" | "free_shipping";
+
+interface Product {
+  id: string;
+  name: string;
+  category: string;
+  base_price: number;
+  available: boolean;
+  image_url?: string | null;
+}
+
+interface PromotionProductLink {
+  product_id: string;
+}
+
+interface Promotion {
+  id: string;
+  title: string;
+  description: string | null;
+  discount_type: PromotionDiscountType;
+  discount_value: number | null;
+  applies_to_all: boolean;
+  free_shipping: boolean;
+  starts_at: string | null;
+  ends_at: string | null;
+  active: boolean;
+  promotion_products?: PromotionProductLink[];
+}
+
+interface PromotionFormState {
+  id?: string;
+  title: string;
+  description: string;
+  discountType: PromotionDiscountType;
+  discountValue: string;
+  appliesToAll: boolean;
+  freeShipping: boolean;
+  startsAt: string;
+  endsAt: string;
+  active: boolean;
+}
+
+const formatDateInput = (date: Date) => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const toDateTimeLocalInput = (value: string | null) => {
+  if (!value) return "";
+  const date = new Date(value);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  const hours = `${date.getHours()}`.padStart(2, "0");
+  const minutes = `${date.getMinutes()}`.padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const fromDateTimeLocalInput = (value: string) => {
+  if (!value) return null;
+  const date = new Date(value);
+  return date.toISOString();
+};
+
+const getTodayDateString = () => formatDateInput(new Date());
+
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(value);
+
+const formatDateDisplay = (value: string) =>
+  new Date(`${value}T00:00:00`).toLocaleDateString("pt-PT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+
+const defaultPromotionFormState: PromotionFormState = {
+  title: "",
+  description: "",
+  discountType: "percentage",
+  discountValue: "",
+  appliesToAll: true,
+  freeShipping: false,
+  startsAt: "",
+  endsAt: "",
+  active: true,
+};
+
+const PRODUCT_CATEGORY_LABELS: Record<string, string> = {
+  eclair: "Éclairs",
+  chocotone: "Chocotones",
+  rocambole: "Rocamboles",
+};
 
 const Admin = () => {
   const navigate = useNavigate();
@@ -79,20 +203,78 @@ const Admin = () => {
   const [periodFilter, setPeriodFilter] = useState<string>("todos");
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [previousOrdersCount, setPreviousOrdersCount] = useState(0);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [selectedMenuDate, setSelectedMenuDate] = useState<string>(getTodayDateString());
+  const [dailyProductIds, setDailyProductIds] = useState<string[]>([]);
+  const [loadingDailySelection, setLoadingDailySelection] = useState(false);
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [promotionDialogOpen, setPromotionDialogOpen] = useState(false);
+  const [promotionForm, setPromotionForm] = useState<PromotionFormState>({ ...defaultPromotionFormState });
+  const [promotionProductsSelection, setPromotionProductsSelection] = useState<string[]>([]);
+  const [savingPromotion, setSavingPromotion] = useState(false);
+  const [orderItemsSummary, setOrderItemsSummary] = useState<OrderItemRow[]>([]);
+  const [productTotals, setProductTotals] = useState<ProductAggregate[]>([]);
+  const [ordersPerDaySummary, setOrdersPerDaySummary] = useState<OrdersPerDaySummary[]>([]);
 
-  useEffect(() => {
-    checkAdminAccess();
-  }, []);
+  const isNatalOrder = useCallback((order: Order) => Boolean(order.scheduled_for), []);
 
-  const loadOrders = async () => {
+  const updateAnalytics = useCallback((ordersList: Order[], itemsList: OrderItemRow[]) => {
+    const totalsMap = new Map<string, ProductAggregate>();
+    itemsList.forEach((item) => {
+      const entry = totalsMap.get(item.product_name) ?? {
+        product_name: item.product_name,
+        quantity: 0,
+        revenue: 0,
+      };
+      entry.quantity += item.quantity;
+      entry.revenue += Number(item.total_price);
+      totalsMap.set(item.product_name, entry);
+    });
+    const totalsArray = Array.from(totalsMap.values()).sort((a, b) => b.quantity - a.quantity);
+    setProductTotals(totalsArray);
+
+    const perDayMap = new Map<string, OrdersPerDaySummary>();
+    ordersList.forEach((orderItem) => {
+      const dateKey = orderItem.created_at.slice(0, 10);
+      const entry =
+        perDayMap.get(dateKey) ?? {
+          date: dateKey,
+          totalOrders: 0,
+          natalOrders: 0,
+          regularOrders: 0,
+          totalValue: 0,
+        };
+      entry.totalOrders += 1;
+      entry.totalValue += Number(orderItem.total);
+      if (isNatalOrder(orderItem)) {
+        entry.natalOrders += 1;
+      } else {
+        entry.regularOrders += 1;
+      }
+      perDayMap.set(dateKey, entry);
+    });
+    setOrdersPerDaySummary(Array.from(perDayMap.values()).sort((a, b) => b.date.localeCompare(a.date)));
+  }, [isNatalOrder]);
+  const groupedProducts = useMemo(() => {
+    const groups: Record<string, Product[]> = {};
+    allProducts.forEach((product) => {
+      if (!groups[product.category]) {
+        groups[product.category] = [];
+      }
+      groups[product.category].push(product);
+    });
+    Object.values(groups).forEach((products) => products.sort((a, b) => a.name.localeCompare(b.name)));
+    return groups;
+  }, [allProducts]);
+
+  const loadOrders = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select('*')
+        .select<Order[]>('*')
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -100,28 +282,374 @@ const Admin = () => {
         throw error;
       }
       console.log('Orders loaded:', data?.length || 0);
-      setOrders(data || []);
-      return data || [];
+      const ordersData = data || [];
+      setOrders(ordersData);
+
+      const { data: orderItemsData, error: orderItemsError } = await supabase
+        .from('order_items')
+        .select<OrderItemRow[]>('order_id, product_name, quantity, total_price');
+
+      if (orderItemsError) {
+        console.error('Error fetching order items:', orderItemsError);
+        throw orderItemsError;
+      }
+
+      const orderItemsList = orderItemsData ?? [];
+      setOrderItemsSummary(orderItemsList);
+      updateAnalytics(ordersData, orderItemsList);
+      return ordersData;
     } catch (error) {
       console.error('Error loading orders:', error);
       toast.error("Erro ao carregar pedidos. Você pode continuar usando o painel.");
       // Não bloquear o acesso, apenas mostrar erro
       setOrders([]);
+      setOrderItemsSummary([]);
+      setProductTotals([]);
+      setOrdersPerDaySummary([]);
       return [];
     }
+  }, [updateAnalytics]);
+
+  const loadAllProducts = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select<Product[]>('id, name, category, base_price, available, image_url')
+        .order('category', { ascending: true })
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      setAllProducts(data ?? []);
+    } catch (error) {
+      console.error('Erro ao carregar produtos:', error);
+      toast.error('Erro ao carregar produtos');
+    }
+  }, []);
+
+  const loadDailyProducts = useCallback(async (date: string) => {
+    setLoadingDailySelection(true);
+    try {
+      const { data, error } = await supabase
+        .from('daily_product_availability')
+        .select<{ product_id: string }[]>('product_id')
+        .eq('available_date', date)
+        .eq('is_active', true);
+
+      if (error) throw error;
+      setDailyProductIds((data ?? []).map((item) => item.product_id));
+    } catch (error) {
+      console.error('Erro ao carregar produtos do dia:', error);
+      toast.error('Erro ao carregar produtos do dia');
+    } finally {
+      setLoadingDailySelection(false);
+    }
+  }, []);
+
+  const handleToggleDailyProduct = useCallback(
+    async (productId: string, enabled: boolean) => {
+      try {
+        if (enabled) {
+          const { error } = await supabase
+            .from('daily_product_availability')
+            .upsert(
+              {
+                product_id: productId,
+                available_date: selectedMenuDate,
+                is_active: true,
+              },
+              { onConflict: 'product_id,available_date' },
+            );
+
+          if (error) throw error;
+          setDailyProductIds((prev) => Array.from(new Set([...prev, productId])));
+          toast.success("Produto adicionado ao menu do dia");
+        } else {
+          const { error } = await supabase
+            .from('daily_product_availability')
+            .delete()
+            .eq('product_id', productId)
+            .eq('available_date', selectedMenuDate);
+
+          if (error) throw error;
+          setDailyProductIds((prev) => prev.filter((id) => id !== productId));
+          toast.success("Produto removido do menu do dia");
+        }
+      } catch (error) {
+        console.error('Erro ao atualizar produtos do dia:', error);
+        toast.error('Erro ao atualizar produtos do dia');
+        await loadDailyProducts(selectedMenuDate);
+      }
+    },
+    [loadDailyProducts, selectedMenuDate],
+  );
+
+  const loadPromotions = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('promotions')
+        .select('id, title, description, discount_type, discount_value, applies_to_all, free_shipping, starts_at, ends_at, active, promotion_products ( product_id )')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const typedData =
+        (data as (Promotion & { promotion_products: PromotionProductLink[] | null })[] | null) ?? [];
+
+      setPromotions(
+        typedData.map((promotion) => ({
+          ...promotion,
+          promotion_products: promotion.promotion_products ?? [],
+        })),
+      );
+    } catch (error) {
+      console.error('Erro ao carregar promoções:', error);
+      toast.error('Erro ao carregar promoções');
+    }
+  }, []);
+
+  const resetPromotionFormState = useCallback(() => {
+    setPromotionForm({ ...defaultPromotionFormState });
+    setPromotionProductsSelection([]);
+  }, []);
+
+  const handleOpenNewPromotion = () => {
+    resetPromotionFormState();
+    setPromotionDialogOpen(true);
   };
+
+  const handleEditPromotion = (promotion: Promotion) => {
+    setPromotionForm({
+      id: promotion.id,
+      title: promotion.title,
+      description: promotion.description ?? "",
+      discountType: promotion.discount_type,
+      discountValue:
+        promotion.discount_type === "free_shipping" || promotion.discount_value === null
+          ? ""
+          : String(promotion.discount_value),
+      appliesToAll: promotion.applies_to_all,
+      freeShipping: promotion.free_shipping,
+      startsAt: toDateTimeLocalInput(promotion.starts_at),
+      endsAt: toDateTimeLocalInput(promotion.ends_at),
+      active: promotion.active,
+    });
+    setPromotionProductsSelection(
+      promotion.applies_to_all ? [] : (promotion.promotion_products ?? []).map((link) => link.product_id),
+    );
+    setPromotionDialogOpen(true);
+  };
+
+  const handlePromotionProductsSelection = (productId: string, checked: boolean) => {
+    setPromotionProductsSelection((prev) =>
+      checked ? Array.from(new Set([...prev, productId])) : prev.filter((id) => id !== productId),
+    );
+  };
+
+  const handleSavePromotion = async () => {
+    try {
+      if (!promotionForm.title.trim()) {
+        toast.error("Informe o título da promoção");
+        return;
+      }
+
+      if (promotionForm.discountType !== "free_shipping") {
+        const numericValue = Number(promotionForm.discountValue);
+        if (Number.isNaN(numericValue) || numericValue <= 0) {
+          toast.error("Informe um valor de desconto válido");
+          return;
+        }
+        if (promotionForm.discountType === "percentage" && numericValue > 100) {
+          toast.error("O desconto percentual deve ser no máximo 100%");
+          return;
+        }
+      }
+
+      if (!promotionForm.appliesToAll && promotionProductsSelection.length === 0) {
+        toast.error("Selecione pelo menos um produto para a promoção");
+        return;
+      }
+
+      setSavingPromotion(true);
+
+      const payload = {
+        title: promotionForm.title.trim(),
+        description: promotionForm.description.trim() || null,
+        discount_type: promotionForm.discountType,
+        discount_value:
+          promotionForm.discountType === "free_shipping"
+            ? null
+            : Number(Number(promotionForm.discountValue).toFixed(2)),
+        applies_to_all: promotionForm.appliesToAll,
+        free_shipping: promotionForm.freeShipping || promotionForm.discountType === "free_shipping",
+        starts_at: promotionForm.startsAt ? fromDateTimeLocalInput(promotionForm.startsAt) : null,
+        ends_at: promotionForm.endsAt ? fromDateTimeLocalInput(promotionForm.endsAt) : null,
+        active: promotionForm.active,
+      };
+
+      let promotionId = promotionForm.id;
+      if (promotionForm.id) {
+        const { error } = await supabase.from('promotions').update(payload).eq('id', promotionForm.id);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase.from('promotions').insert(payload).select().single();
+        if (error) throw error;
+        promotionId = data?.id;
+      }
+
+      if (!promotionId) {
+        throw new Error("Não foi possível obter o ID da promoção");
+      }
+
+      const { error: deleteLinksError } = await supabase.from('promotion_products').delete().eq('promotion_id', promotionId);
+      if (deleteLinksError) throw deleteLinksError;
+
+      if (!promotionForm.appliesToAll && promotionProductsSelection.length > 0) {
+        const insertPayload = promotionProductsSelection.map((productId) => ({
+          promotion_id: promotionId,
+          product_id: productId,
+        }));
+
+        const { error: linkError } = await supabase.from('promotion_products').upsert(insertPayload);
+        if (linkError) throw linkError;
+      }
+
+      toast.success(promotionForm.id ? "Promoção atualizada com sucesso" : "Promoção criada com sucesso");
+      setPromotionDialogOpen(false);
+      resetPromotionFormState();
+      await loadPromotions();
+    } catch (error) {
+      console.error('Erro ao salvar promoção:', error);
+      toast.error('Erro ao salvar promoção');
+    } finally {
+      setSavingPromotion(false);
+    }
+  };
+
+  const handleTogglePromotionActive = async (promotionId: string, nextActive: boolean) => {
+    try {
+      const { error } = await supabase.from('promotions').update({ active: nextActive }).eq('id', promotionId);
+      if (error) throw error;
+
+      toast.success(nextActive ? "Promoção ativada" : "Promoção desativada");
+      await loadPromotions();
+    } catch (error) {
+      console.error('Erro ao atualizar promoção:', error);
+      toast.error('Erro ao atualizar promoção');
+    }
+  };
+
+  const handleDeletePromotion = async (promotionId: string) => {
+    try {
+      if (!window.confirm("Deseja realmente excluir esta promoção?")) {
+        return;
+      }
+      const { error } = await supabase.from('promotions').delete().eq('id', promotionId);
+      if (error) throw error;
+
+      toast.success("Promoção excluída com sucesso");
+      await loadPromotions();
+    } catch (error) {
+      console.error('Erro ao excluir promoção:', error);
+      toast.error('Erro ao excluir promoção');
+    }
+  };
+
+
+  const checkAdminAccess = useCallback(async () => {
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      console.log('Session check:', { session: !!session, error: sessionError });
+      
+      if (!session) {
+        console.log('No session found, redirecting to auth');
+        toast.error("Por favor, faça login para continuar");
+        setLoading(false);
+        navigate("/auth");
+        return;
+      }
+
+      console.log('User email:', session.user.email);
+
+      // Check if user is admin
+      const { data: adminCheck, error: adminError } = await supabase
+        .rpc('is_admin');
+
+      console.log('Admin check result:', { adminCheck, error: adminError });
+
+      if (adminError) {
+        console.error('Error calling is_admin:', adminError);
+        toast.error(`Erro ao verificar permissões: ${adminError.message}`);
+        setLoading(false);
+        return;
+      }
+
+      if (!adminCheck) {
+        console.log('User is not admin, email:', session.user.email);
+        toast.error(`Acesso negado. Apenas administradores podem acessar esta página. Seu email: ${session.user.email}`);
+        setLoading(false);
+        navigate("/");
+        return;
+      }
+
+      console.log('User is admin, loading orders');
+      setIsAdmin(true);
+      try {
+        await loadOrders();
+      } catch (error) {
+        console.error('Error loading orders:', error);
+        // Não bloquear o acesso se houver erro ao carregar pedidos
+      }
+      setLoading(false);
+    } catch (error) {
+      console.error('Error checking admin access:', error);
+      toast.error(`Erro ao verificar permissões: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+      setLoading(false);
+    }
+  }, [loadOrders, navigate]);
+
+  useEffect(() => {
+    checkAdminAccess();
+  }, [checkAdminAccess]);
+
+  useEffect(() => {
+    if (isAdmin) {
+      void loadAllProducts();
+      void loadPromotions();
+    }
+  }, [isAdmin, loadAllProducts, loadPromotions]);
+
+  useEffect(() => {
+    if (isAdmin && selectedMenuDate) {
+      void loadDailyProducts(selectedMenuDate);
+    }
+  }, [isAdmin, loadDailyProducts, selectedMenuDate]);
+
+  useEffect(() => {
+    if (promotionForm.appliesToAll && promotionProductsSelection.length > 0) {
+      setPromotionProductsSelection([]);
+    }
+  }, [promotionForm.appliesToAll, promotionProductsSelection.length]);
 
   // Realtime subscription para atualizações automáticas
   useEffect(() => {
     if (!isAdmin) return;
 
-    let currentOrdersCount = 0;
-    let channel: any = null;
+    let channel: RealtimeChannel | null = null;
 
     // Função para tocar notificação sonora (estilo Uber Eats - longo e chamativo)
     const playNotificationSound = () => {
       try {
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const audioContextClass =
+          window.AudioContext ||
+          (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+        if (!audioContextClass) {
+          console.warn('Web Audio API não suportada neste navegador.');
+          return;
+        }
+
+        const audioContext = new audioContextClass();
         const now = audioContext.currentTime;
         
         // Primeira sequência: 3 notas ascendentes (estilo "novo pedido!")
@@ -178,12 +706,12 @@ const Admin = () => {
           schema: 'public',
           table: 'orders',
         },
-        async (payload: any) => {
+        async (payload: RealtimePostgresInsertPayload<Order>) => {
           console.log('🔔🔔🔔 NOVO PEDIDO DETECTADO!', payload);
           console.log('Event type:', payload.eventType);
           console.log('New order:', payload.new);
           
-          const newOrder = payload.new as Order;
+          const newOrder = payload.new;
           
           // Tocar som IMEDIATAMENTE
           playNotificationSound();
@@ -235,8 +763,6 @@ const Admin = () => {
           
           // Carregar pedidos após subscription estar ativa
           loadOrders().then((loadedOrders) => {
-            currentOrdersCount = loadedOrders.length;
-            setPreviousOrdersCount(loadedOrders.length);
             console.log(`Pedidos carregados: ${loadedOrders.length}`);
           });
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
@@ -253,61 +779,7 @@ const Admin = () => {
         supabase.removeChannel(channel);
       }
     };
-  }, [isAdmin]);
-
-  const checkAdminAccess = async () => {
-    try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      console.log('Session check:', { session: !!session, error: sessionError });
-      
-      if (!session) {
-        console.log('No session found, redirecting to auth');
-        toast.error("Por favor, faça login para continuar");
-        setLoading(false);
-        navigate("/auth");
-        return;
-      }
-
-      console.log('User email:', session.user.email);
-
-      // Check if user is admin
-      const { data: adminCheck, error: adminError } = await supabase
-        .rpc('is_admin');
-
-      console.log('Admin check result:', { adminCheck, error: adminError });
-
-      if (adminError) {
-        console.error('Error calling is_admin:', adminError);
-        toast.error(`Erro ao verificar permissões: ${adminError.message}`);
-        setLoading(false);
-        return;
-      }
-
-      if (!adminCheck) {
-        console.log('User is not admin, email:', session.user.email);
-        toast.error(`Acesso negado. Apenas administradores podem acessar esta página. Seu email: ${session.user.email}`);
-        setLoading(false);
-        navigate("/");
-        return;
-      }
-
-      console.log('User is admin, loading orders');
-      setIsAdmin(true);
-      try {
-      await loadOrders();
-      } catch (error) {
-        console.error('Error loading orders:', error);
-        // Não bloquear o acesso se houver erro ao carregar pedidos
-      }
-      setLoading(false);
-    } catch (error) {
-      console.error('Error checking admin access:', error);
-      toast.error(`Erro ao verificar permissões: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
-      setLoading(false);
-    }
-  };
-
+  }, [isAdmin, loadOrders]);
 
   const updateOrderStatus = async (orderId: string, newStatus: 'pendente' | 'confirmado' | 'em_preparacao' | 'a_caminho' | 'concluido') => {
     try {
@@ -358,9 +830,12 @@ const Admin = () => {
       toast.success("Pedido excluído com sucesso");
       setOrderToDelete(null);
       await loadOrders();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error deleting order:', error);
-      const errorMessage = error?.message || "Erro ao excluir pedido. Verifique se você tem permissão.";
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Erro ao excluir pedido. Verifique se você tem permissão.";
       toast.error(errorMessage);
     } finally {
       setDeleteLoading(false);
@@ -456,7 +931,7 @@ const Admin = () => {
     try {
       const { data, error } = await supabase
         .from('order_items')
-        .select('*')
+        .select<OrderItem[]>('*')
         .eq('order_id', orderId);
 
       if (error) throw error;
@@ -582,6 +1057,174 @@ const Admin = () => {
       .reduce((sum, order) => sum + order.total, 0);
   };
 
+  const filteredOrders = getFilteredOrders();
+  const filteredDailyOrders = filteredOrders.filter((order) => !isNatalOrder(order));
+  const filteredNatalOrders = filteredOrders.filter((order) => isNatalOrder(order));
+
+  const renderOrdersTable = (
+    ordersToRender: Order[],
+    title: string,
+    Icon: ComponentType<{ className?: string }>,
+    emptyMessage: string,
+  ) => {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Icon className="h-5 w-5" />
+            {title} ({ordersToRender.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {ordersToRender.length === 0 ? (
+            <p className="text-center text-foreground py-8">{emptyMessage}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-foreground font-semibold">Data</TableHead>
+                    <TableHead className="text-foreground font-semibold">Cliente</TableHead>
+                    <TableHead className="text-foreground font-semibold">Contacto</TableHead>
+                    <TableHead className="text-foreground font-semibold">Entrega</TableHead>
+                    <TableHead className="text-foreground font-semibold">Agendamento</TableHead>
+                    <TableHead className="text-foreground font-semibold">Pagamento</TableHead>
+                    <TableHead className="text-foreground font-semibold">Total</TableHead>
+                    <TableHead className="text-foreground font-semibold">Status</TableHead>
+                    <TableHead className="text-foreground font-semibold">Ação Rápida</TableHead>
+                    <TableHead className="text-foreground font-semibold">Alterar Status</TableHead>
+                    <TableHead className="text-foreground font-semibold">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {ordersToRender.map((order) => (
+                    <TableRow key={order.id}>
+                      <TableCell className="whitespace-nowrap">
+                        {new Date(order.created_at).toLocaleDateString('pt-PT', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium text-foreground">{order.customer_name}</p>
+                          <p className="text-sm text-foreground">{order.customer_email}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-foreground">{order.customer_phone}</TableCell>
+                      <TableCell>
+                        <div>
+                          <Badge variant={order.delivery_type === 'entrega' ? 'default' : 'secondary'}>
+                            {order.delivery_type === 'entrega' ? 'Entrega' : 'Recolher'}
+                          </Badge>
+                          {order.delivery_address && (
+                            <p className="text-xs text-foreground mt-1 max-w-[200px]">
+                              {order.delivery_address}
+                            </p>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {order.scheduled_for
+                          ? `${formatDateDisplay(order.scheduled_for)} (09:00 - 16:30)`
+                          : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {order.payment_method === 'dinheiro' ? 'Dinheiro' : 'MB WAY'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1 font-medium">
+                          <Euro className="h-4 w-4" />
+                          {order.total.toFixed(2)}€
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={getStatusBadgeVariant(order.status)}>
+                          {getStatusLabel(order.status)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col gap-2">
+                          {getQuickActions(order).map((quickAction, idx) => {
+                            const QuickIcon = quickAction.icon;
+                            return (
+                              <Button
+                                key={idx}
+                                size="sm"
+                                variant={quickAction.variant}
+                                onClick={() => handleQuickAction(order, quickAction.action)}
+                                className="w-full justify-start"
+                              >
+                                <QuickIcon className="h-4 w-4 mr-2" />
+                                {quickAction.label}
+                              </Button>
+                            );
+                          })}
+                          {getQuickActions(order).length === 0 && (
+                            <span className="text-sm text-foreground/70">Sem ações</span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={order.status || 'pendente'}
+                          onValueChange={(value) =>
+                            updateOrderStatus(
+                              order.id,
+                              value as 'pendente' | 'confirmado' | 'em_preparacao' | 'a_caminho' | 'concluido',
+                            )
+                          }
+                        >
+                          <SelectTrigger className="w-[180px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="pendente">Pendente</SelectItem>
+                            <SelectItem value="confirmado">Confirmado</SelectItem>
+                            <SelectItem value="em_preparacao">Em Preparação</SelectItem>
+                            <SelectItem value="a_caminho">A Caminho</SelectItem>
+                            <SelectItem value="concluido">Concluído</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleViewDetails(order)}
+                            className="w-full"
+                          >
+                            <Eye className="h-4 w-4 mr-2" />
+                            Ver Detalhes
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => setOrderToDelete(order)}
+                            className="w-full"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Excluir
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -687,7 +1330,7 @@ const Admin = () => {
 
         {/* Tabs para organizar */}
         <Tabs defaultValue="visao-geral" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="visao-geral">
               <TrendingUp className="h-4 w-4 mr-2" />
               Visão Geral
@@ -699,6 +1342,10 @@ const Admin = () => {
             <TabsTrigger value="pedidos">
               <Package className="h-4 w-4 mr-2" />
               Pedidos
+            </TabsTrigger>
+            <TabsTrigger value="gestao">
+              <ShoppingBag className="h-4 w-4 mr-2" />
+              Menu do Dia
             </TabsTrigger>
           </TabsList>
 
@@ -803,6 +1450,74 @@ const Admin = () => {
                   <p className="text-xs text-foreground/70 mt-1">
                     Pedidos deste mês
                   </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Produtos mais vendidos</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {productTotals.length === 0 ? (
+                    <p className="text-sm text-foreground/70">
+                      Ainda não há dados suficientes para mostrar os produtos mais vendidos.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {productTotals.slice(0, 5).map((item) => (
+                        <li
+                          key={item.product_name}
+                          className="flex items-center justify-between text-sm border-b last:border-0 border-border/60 pb-2"
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-medium text-foreground">{item.product_name}</span>
+                            <span className="text-xs text-foreground/70">
+                              {item.quantity} unidades
+                            </span>
+                          </div>
+                          <span className="text-sm font-semibold text-foreground">
+                            {formatCurrency(item.revenue)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Pedidos por dia</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {ordersPerDaySummary.length === 0 ? (
+                    <p className="text-sm text-foreground/70">
+                      Ainda não há dados suficientes para mostrar os pedidos por dia.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {ordersPerDaySummary.slice(0, 7).map((day) => (
+                        <div
+                          key={day.date}
+                          className="flex items-center justify-between text-sm border-b last:border-0 border-border/60 pb-2"
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-medium text-foreground">
+                              {formatDateDisplay(day.date)}
+                            </span>
+                            <span className="text-xs text-foreground/70">
+                              {day.regularOrders} pedidos do dia · {day.natalOrders} encomendas de Natal
+                            </span>
+                          </div>
+                          <span className="text-sm font-semibold text-foreground">
+                            {formatCurrency(day.totalValue)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -968,155 +1683,364 @@ const Admin = () => {
               </CardContent>
             </Card>
 
-            {/* Tabela de Pedidos */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Package className="h-5 w-5" />
-                  Lista de Pedidos ({getFilteredOrders().length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-                {getFilteredOrders().length === 0 ? (
-                  <p className="text-center text-foreground py-8">
-                Nenhum pedido encontrado
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-foreground font-semibold">Data</TableHead>
-                      <TableHead className="text-foreground font-semibold">Cliente</TableHead>
-                      <TableHead className="text-foreground font-semibold">Contacto</TableHead>
-                      <TableHead className="text-foreground font-semibold">Entrega</TableHead>
-                      <TableHead className="text-foreground font-semibold">Pagamento</TableHead>
-                      <TableHead className="text-foreground font-semibold">Total</TableHead>
-                      <TableHead className="text-foreground font-semibold">Status</TableHead>
-                      <TableHead className="text-foreground font-semibold">Ação Rápida</TableHead>
-                      <TableHead className="text-foreground font-semibold">Alterar Status</TableHead>
-                      <TableHead className="text-foreground font-semibold">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                        {getFilteredOrders().map((order) => (
-                      <TableRow key={order.id}>
-                        <TableCell className="whitespace-nowrap">
-                          {new Date(order.created_at).toLocaleDateString('pt-PT', {
-                            day: '2-digit',
-                            month: '2-digit',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {renderOrdersTable(
+                filteredDailyOrders,
+                "Pedidos do Dia",
+                Package,
+                "Nenhum pedido do dia encontrado.",
+              )}
+              {renderOrdersTable(
+                filteredNatalOrders,
+                "Encomendas de Natal",
+                Gift,
+                "Nenhuma encomenda de Natal encontrada.",
+              )}
+            </div>
+          </TabsContent>
+
+          {/* Tab Gestão do Dia */}
+          <TabsContent value="gestao" className="space-y-6">
+            <Card>
+              <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle>Produtos do dia</CardTitle>
+                  <p className="text-sm text-foreground/70">
+                    Selecione os produtos que ficarão visíveis na página inicial para os clientes.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="menu-date" className="text-sm text-foreground/70">
+                    Data
+                  </Label>
+                  <Input
+                    id="menu-date"
+                    type="date"
+                    value={selectedMenuDate}
+                    onChange={(event) => setSelectedMenuDate(event.target.value || getTodayDateString())}
+                    className="w-auto"
+                  />
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingDailySelection ? (
+                  <div className="py-6 text-center text-foreground/70">A carregar menu do dia...</div>
+                ) : allProducts.length === 0 ? (
+                  <p className="py-6 text-center text-foreground/70">
+                    Nenhum produto cadastrado.
+                  </p>
+                ) : Object.keys(groupedProducts).length === 0 ? (
+                  <p className="py-6 text-center text-foreground/70">
+                    Nenhum produto disponível para esta data.
+                  </p>
+                ) : (
+                  <div className="space-y-6">
+                    {Object.entries(groupedProducts).map(([category, products]) => (
+                      <div key={category} className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-foreground">
+                            {PRODUCT_CATEGORY_LABELS[category] ?? category}
+                          </h3>
+                          <span className="text-xs text-foreground/60">{products.length} produto(s)</span>
+                        </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {products.map((product) => {
+                            const isSelected = dailyProductIds.includes(product.id);
+                            return (
+                              <div
+                                key={product.id}
+                                className="flex items-start justify-between gap-4 rounded-lg border p-4"
+                              >
+                                <div>
+                                  <p className="font-medium text-foreground">{product.name}</p>
+                                  <p className="text-sm text-foreground/70">{formatCurrency(product.base_price)}</p>
+                                </div>
+                                <Switch
+                                  checked={isSelected}
+                                  onCheckedChange={(value) => handleToggleDailyProduct(product.id, value)}
+                                />
+                              </div>
+                            );
                           })}
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                                <p className="font-medium text-foreground">{order.customer_name}</p>
-                                <p className="text-sm text-foreground">{order.customer_email}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-foreground">{order.customer_phone}</TableCell>
-                        <TableCell>
-                          <div>
-                            <Badge variant={order.delivery_type === 'entrega' ? 'default' : 'secondary'}>
-                              {order.delivery_type === 'entrega' ? 'Entrega' : 'Recolher'}
-                            </Badge>
-                            {order.delivery_address && (
-                                  <p className="text-xs text-foreground mt-1 max-w-[200px]">
-                                {order.delivery_address}
-                              </p>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {order.payment_method === 'dinheiro' ? 'Dinheiro' : 'MB WAY'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1 font-medium">
-                            <Euro className="h-4 w-4" />
-                                {order.total.toFixed(2)}€
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={getStatusBadgeVariant(order.status)}>
-                            {getStatusLabel(order.status)}
-                          </Badge>
-                        </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col gap-2">
-                                {getQuickActions(order).map((quickAction, idx) => {
-                                  const Icon = quickAction.icon;
-                                  return (
-                                    <Button
-                                      key={idx}
-                                      size="sm"
-                                      variant={quickAction.variant}
-                                      onClick={() => handleQuickAction(order, quickAction.action)}
-                                      className="w-full justify-start"
-                                    >
-                                      <Icon className="h-4 w-4 mr-2" />
-                                      {quickAction.label}
-                                    </Button>
-                                  );
-                                })}
-                                {getQuickActions(order).length === 0 && (
-                                  <span className="text-sm text-foreground/70">Sem ações</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle>Promoções</CardTitle>
+                  <p className="text-sm text-foreground/70">
+                    Crie e gere promoções válidas para o dia, incluindo entregas grátis e descontos específicos.
+                  </p>
+                </div>
+                <Button onClick={handleOpenNewPromotion}>Nova Promoção</Button>
+              </CardHeader>
+              <CardContent>
+                {promotions.length === 0 ? (
+                  <p className="py-6 text-center text-foreground/70">Nenhuma promoção cadastrada.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {promotions.map((promotion) => {
+                      const productNames = promotion.applies_to_all
+                        ? []
+                        : (promotion.promotion_products ?? [])
+                            .map((link) => allProducts.find((product) => product.id === link.product_id)?.name)
+                            .filter(Boolean) as string[];
+
+                      return (
+                        <div key={promotion.id} className="rounded-lg border p-4">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2">
+                                <h3 className="text-lg font-semibold text-foreground">{promotion.title}</h3>
+                                <Badge variant={promotion.active ? "default" : "secondary"}>
+                                  {promotion.active ? "Ativa" : "Inativa"}
+                                </Badge>
+                              </div>
+                              {promotion.description && (
+                                <p className="text-sm text-foreground/70">{promotion.description}</p>
+                              )}
+                              <div className="flex flex-wrap gap-2 text-sm text-foreground/80">
+                                <span>
+                                  {promotion.discount_type === "percentage" && promotion.discount_value !== null
+                                    ? `Desconto de ${promotion.discount_value}%`
+                                    : promotion.discount_type === "fixed" && promotion.discount_value !== null
+                                    ? `Desconto de ${formatCurrency(promotion.discount_value)}`
+                                    : "Entrega grátis"}
+                                </span>
+                                {promotion.free_shipping && promotion.discount_type !== "free_shipping" && (
+                                  <Badge variant="outline">Entrega grátis</Badge>
                                 )}
                               </div>
-                        </TableCell>
-                        <TableCell>
-                          <Select
-                            value={order.status || 'pendente'}
-                            onValueChange={(value) => updateOrderStatus(order.id, value as 'pendente' | 'confirmado' | 'em_preparacao' | 'a_caminho' | 'concluido')}
-                          >
-                            <SelectTrigger className="w-[180px]">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="pendente">Pendente</SelectItem>
-                              <SelectItem value="confirmado">Confirmado</SelectItem>
-                              <SelectItem value="em_preparacao">Em Preparação</SelectItem>
-                              <SelectItem value="a_caminho">A Caminho</SelectItem>
-                              <SelectItem value="concluido">Concluído</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleViewDetails(order)}
-                                  className="w-full"
-                                >
-                                  <Eye className="h-4 w-4 mr-2" />
-                                  Ver Detalhes
-                                </Button>
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  onClick={() => setOrderToDelete(order)}
-                                  className="w-full"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Excluir
-                                </Button>
+                              <div className="space-y-1 text-sm text-foreground/70">
+                                <p>
+                                  {promotion.starts_at
+                                    ? `Início: ${new Date(promotion.starts_at).toLocaleString('pt-PT')}`
+                                    : "Sem data inicial definida"}
+                                </p>
+                                <p>
+                                  {promotion.ends_at
+                                    ? `Fim: ${new Date(promotion.ends_at).toLocaleString('pt-PT')}`
+                                    : "Sem data final definida"}
+                                </p>
+                                <p>
+                                  {promotion.applies_to_all
+                                    ? "Aplica-se a todos os produtos"
+                                    : productNames.length > 0
+                                      ? `Produtos: ${productNames.join(", ")}`
+                                      : "Sem produtos associados"}
+                                </p>
                               </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                            </div>
+                            <div className="flex flex-col gap-2 md:items-end">
+                              <Button variant="outline" size="sm" onClick={() => handleEditPromotion(promotion)}>
+                                Editar
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleTogglePromotionActive(promotion.id, !promotion.active)}
+                              >
+                                {promotion.active ? "Desativar" : "Ativar"}
+                              </Button>
+                              <Button variant="destructive" size="sm" onClick={() => handleDeletePromotion(promotion.id)}>
+                                Excluir
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </main>
+
+      <Dialog
+        open={promotionDialogOpen}
+        onOpenChange={(open) => {
+          setPromotionDialogOpen(open);
+          if (!open) {
+            resetPromotionFormState();
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{promotionForm.id ? "Editar promoção" : "Nova promoção"}</DialogTitle>
+            <DialogDescription className="text-foreground">
+              Configure descontos e vantagens que serão aplicados ao menu do dia.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="promotion-title">Título</Label>
+              <Input
+                id="promotion-title"
+                value={promotionForm.title}
+                onChange={(event) => setPromotionForm((prev) => ({ ...prev, title: event.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="promotion-description">Descrição</Label>
+              <Textarea
+                id="promotion-description"
+                value={promotionForm.description}
+                onChange={(event) => setPromotionForm((prev) => ({ ...prev, description: event.target.value }))}
+                rows={3}
+              />
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 md:gap-4">
+              <div className="grid gap-2">
+                <Label>Tipo de desconto</Label>
+                <Select
+                  value={promotionForm.discountType}
+                  onValueChange={(value) =>
+                    setPromotionForm((prev) => ({
+                      ...prev,
+                      discountType: value as PromotionDiscountType,
+                      discountValue: value === "free_shipping" ? "" : prev.discountValue,
+                      freeShipping: value === "free_shipping" ? true : prev.freeShipping,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="percentage">Percentual (%)</SelectItem>
+                    <SelectItem value="fixed">Valor fixo (€)</SelectItem>
+                    <SelectItem value="free_shipping">Entrega grátis</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {promotionForm.discountType !== "free_shipping" && (
+                <div className="grid gap-2">
+                  <Label htmlFor="promotion-discount-value">
+                    Valor do desconto {promotionForm.discountType === "percentage" ? "(%)" : "(€)"}
+                  </Label>
+                  <Input
+                    id="promotion-discount-value"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={promotionForm.discountValue}
+                    onChange={(event) =>
+                      setPromotionForm((prev) => ({ ...prev, discountValue: event.target.value }))
+                    }
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-4">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="promotion-free-shipping"
+                  checked={promotionForm.freeShipping || promotionForm.discountType === "free_shipping"}
+                  onCheckedChange={(checked) =>
+                    setPromotionForm((prev) => ({
+                      ...prev,
+                      freeShipping: prev.discountType === "free_shipping" ? true : checked,
+                    }))
+                  }
+                  disabled={promotionForm.discountType === "free_shipping"}
+                />
+                <Label htmlFor="promotion-free-shipping" className="text-sm text-foreground">
+                  Incluir entrega grátis
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="promotion-applies-all"
+                  checked={promotionForm.appliesToAll}
+                  onCheckedChange={(checked) => setPromotionForm((prev) => ({ ...prev, appliesToAll: checked }))}
+                />
+                <Label htmlFor="promotion-applies-all" className="text-sm text-foreground">
+                  Aplica-se a todos os produtos
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="promotion-active"
+                  checked={promotionForm.active}
+                  onCheckedChange={(checked) => setPromotionForm((prev) => ({ ...prev, active: checked }))}
+                />
+                <Label htmlFor="promotion-active" className="text-sm text-foreground">
+                  Promoção ativa
+                </Label>
+              </div>
+            </div>
+
+            {!promotionForm.appliesToAll && (
+              <div className="grid gap-2">
+                <Label>Selecionar produtos</Label>
+                <div className="grid max-h-48 gap-2 overflow-y-auto rounded-md border p-4">
+                  {allProducts.length === 0 ? (
+                    <p className="text-sm text-foreground/70">Nenhum produto disponível.</p>
+                  ) : (
+                    allProducts.map((product) => (
+                      <label key={product.id} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="text-foreground">{product.name}</span>
+                        <Checkbox
+                          checked={promotionProductsSelection.includes(product.id)}
+                          onCheckedChange={(checked) =>
+                            handlePromotionProductsSelection(product.id, Boolean(checked))
+                          }
+                        />
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-2 md:grid-cols-2 md:gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="promotion-start">Início</Label>
+                <Input
+                  id="promotion-start"
+                  type="datetime-local"
+                  value={promotionForm.startsAt}
+                  onChange={(event) => setPromotionForm((prev) => ({ ...prev, startsAt: event.target.value }))}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="promotion-end">Fim</Label>
+                <Input
+                  id="promotion-end"
+                  type="datetime-local"
+                  value={promotionForm.endsAt}
+                  onChange={(event) => setPromotionForm((prev) => ({ ...prev, endsAt: event.target.value }))}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPromotionDialogOpen(false);
+                resetPromotionFormState();
+              }}
+              disabled={savingPromotion}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleSavePromotion} disabled={savingPromotion}>
+              {savingPromotion ? "A guardar..." : "Guardar promoção"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog de Detalhes do Pedido */}
       <Dialog open={!!selectedOrder} onOpenChange={(open) => !open && setSelectedOrder(null)}>
@@ -1179,19 +2103,35 @@ const Admin = () => {
                     <p className="text-center text-foreground/70 py-4">Nenhum item encontrado</p>
                   ) : (
                     <div className="space-y-3">
-                      {orderItems.map((item) => (
-                        <div key={item.id} className="flex justify-between items-start py-2 border-b last:border-0">
-                          <div className="flex-1">
-                            <p className="font-medium text-foreground">{item.product_name}</p>
-                            <p className="text-sm text-foreground/70">
-                              {item.quantity}x {item.unit_price.toFixed(2)}€
-                            </p>
+                      {orderItems.map((item) => {
+                        const discount = item.discount_amount ?? 0;
+                        const hasDiscount = discount > 0;
+                        return (
+                          <div key={item.id} className="flex justify-between items-start py-2 border-b last:border-0">
+                            <div className="flex-1">
+                              <p className="font-medium text-foreground">{item.product_name}</p>
+                              <p className="text-sm text-foreground/70">
+                                {item.quantity}x {item.unit_price.toFixed(2)}€
+                              </p>
+                              {hasDiscount && (
+                                <p className="text-xs text-emerald-600">
+                                  Promoção: -{discount.toFixed(2)}€
+                                </p>
+                              )}
+                            </div>
+                            <div className="text-right">
+                              {hasDiscount && (
+                                <p className="text-xs text-foreground/60 line-through">
+                                  {(item.unit_price * item.quantity).toFixed(2)}€
+                                </p>
+                              )}
+                              <p className="font-medium text-foreground">
+                                {item.total_price.toFixed(2)}€
+                              </p>
+                            </div>
                           </div>
-                          <p className="font-medium text-foreground">
-                            {item.total_price.toFixed(2)}€
-                          </p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
@@ -1209,11 +2149,29 @@ const Admin = () => {
                       {(selectedOrder.subtotal || selectedOrder.total - (selectedOrder.delivery_fee || 0)).toFixed(2)}€
                     </span>
                   </div>
-                  {selectedOrder.delivery_fee !== undefined && selectedOrder.delivery_fee > 0 && (
+                  {(selectedOrder.discount_total ?? 0) > 0 && (
+                    <div className="flex justify-between text-emerald-600 text-sm">
+                      <span>Descontos</span>
+                      <span>-{(selectedOrder.discount_total ?? 0).toFixed(2)}€</span>
+                    </div>
+                  )}
+                  {selectedOrder.delivery_fee !== undefined && (
                     <div className="flex justify-between">
                       <span className="text-foreground/70">Taxa de Entrega</span>
                       <span className="text-foreground font-medium">
-                        {selectedOrder.delivery_fee.toFixed(2)}€
+                        {selectedOrder.delivery_fee === 0 ? "Grátis" : `${selectedOrder.delivery_fee.toFixed(2)}€`}
+                      </span>
+                    </div>
+                  )}
+                  {selectedOrder.scheduled_for && (
+                    <div className="flex justify-between">
+                      <span className="text-foreground/70">Agendado para</span>
+                      <span className="text-foreground font-medium">
+                        {`${new Date(selectedOrder.scheduled_for).toLocaleDateString('pt-PT', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                        })} (09:00 - 16:30)`}
                       </span>
                     </div>
                   )}
@@ -1222,6 +2180,19 @@ const Admin = () => {
                     <span className="text-foreground">Total</span>
                     <span className="text-primary">{selectedOrder.total.toFixed(2)}€</span>
                   </div>
+                  {selectedOrder.applied_promotions && selectedOrder.applied_promotions.length > 0 && (
+                    <div className="pt-2 text-sm text-foreground/70">
+                      <p className="mb-1">Promoções aplicadas:</p>
+                      <ul className="list-disc list-inside space-y-1">
+                        {selectedOrder.applied_promotions.map((promotion) => (
+                          <li key={promotion.id}>
+                            {promotion.title}
+                            {promotion.free_shipping ? " • Entrega grátis" : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -1255,6 +2226,18 @@ const Admin = () => {
                       {selectedOrder.delivery_type === 'entrega' ? 'Entrega' : 'Recolher'}
                     </Badge>
                   </div>
+                  {selectedOrder.scheduled_for && (
+                    <div>
+                      <span className="text-sm text-foreground/70">Agendado para</span>
+                      <p className="text-foreground">
+                        {new Date(selectedOrder.scheduled_for).toLocaleDateString('pt-PT', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                        })} (09:00 - 16:30)
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <span className="text-sm text-foreground/70">Método de Pagamento</span>
                     <Badge variant="outline" className="ml-2">

@@ -6,6 +6,128 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const NATAL_CATEGORIES = new Set([
+  "natal_doces",
+  "natal_tabuleiros",
+  "chocotone",
+  "rocambole",
+]);
+
+const NATAL_SCHEDULE_DATE = '2024-12-24';
+
+const getTodayDateString = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = `${now.getMonth() + 1}`.padStart(2, "0");
+  const day = `${now.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+type PromotionDiscountType = "percentage" | "fixed" | "free_shipping";
+
+interface PromotionProductLink {
+  product_id: string;
+}
+
+interface PromotionRecord {
+  id: string;
+  title: string;
+  description: string | null;
+  discount_type: PromotionDiscountType;
+  discount_value: number | null;
+  applies_to_all: boolean;
+  free_shipping: boolean;
+  starts_at: string | null;
+  ends_at: string | null;
+  active: boolean;
+  promotion_products?: PromotionProductLink[] | null;
+}
+
+const roundCurrency = (value: number) => Math.round(value * 100) / 100;
+
+const isPromotionActive = (promotion: PromotionRecord, referenceDate = new Date()) => {
+  if (!promotion.active) return false;
+
+  const startDate = promotion.starts_at ? new Date(promotion.starts_at) : null;
+  const endDate = promotion.ends_at ? new Date(promotion.ends_at) : null;
+
+  if (startDate && referenceDate < startDate) return false;
+  if (endDate && referenceDate > endDate) return false;
+
+  return true;
+};
+
+const promotionAppliesToProduct = (promotion: PromotionRecord, productId: string) => {
+  if (promotion.applies_to_all) return true;
+  const links = promotion.promotion_products ?? [];
+  return links.some((link) => link.product_id === productId);
+};
+
+const calculatePromotionDiscount = (
+  promotion: PromotionRecord,
+  unitPrice: number,
+  quantity: number,
+) => {
+  let discountAmount = 0;
+  const freeShipping = promotion.free_shipping || promotion.discount_type === "free_shipping";
+
+  if (promotion.discount_type === "percentage" && promotion.discount_value !== null) {
+    discountAmount = unitPrice * quantity * (promotion.discount_value / 100);
+  } else if (promotion.discount_type === "fixed" && promotion.discount_value !== null) {
+    discountAmount = promotion.discount_value * quantity;
+  }
+
+  const maxDiscount = unitPrice * quantity;
+  return {
+    discountAmount: Math.min(Math.max(discountAmount, 0), maxDiscount),
+    freeShipping,
+  };
+};
+
+const getBestPromotionForProduct = (
+  productId: string,
+  unitPrice: number,
+  promotions: PromotionRecord[],
+  quantity = 1,
+) => {
+  let bestPromotion: PromotionRecord | null = null;
+  let bestDiscount = 0;
+  let bestFreeShipping = false;
+
+  for (const promotion of promotions) {
+    if (!promotionAppliesToProduct(promotion, productId)) continue;
+
+    const { discountAmount, freeShipping } = calculatePromotionDiscount(promotion, unitPrice, quantity);
+
+    if (
+      discountAmount > bestDiscount ||
+      (discountAmount === bestDiscount && freeShipping && !bestFreeShipping)
+    ) {
+      bestPromotion = promotion;
+      bestDiscount = discountAmount;
+      bestFreeShipping = freeShipping;
+    }
+  }
+
+  if (!bestPromotion) {
+    return {
+      discountedUnitPrice: unitPrice,
+      discountAmount: 0,
+      appliedPromotion: null,
+      freeShipping: false,
+    };
+  }
+
+  const discountedUnit =
+    quantity > 0 ? Math.max(unitPrice - bestDiscount / quantity, 0) : unitPrice;
+
+  return {
+    discountedUnitPrice: roundCurrency(discountedUnit),
+    discountAmount: roundCurrency(bestDiscount),
+    appliedPromotion: { id: bestPromotion.id, title: bestPromotion.title },
+    freeShipping: bestFreeShipping,
+  };
+};
 serve(async (req) => {
   // LOGS IMEDIATOS - DEVEM APARECER SEMPRE
   console.log('========================================');
@@ -84,7 +206,7 @@ serve(async (req) => {
       );
     }
 
-    const { items, customerData } = body;
+    const { items, customerData, scheduledFor } = body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       console.error('Items inválidos ou vazios');
@@ -161,16 +283,121 @@ serve(async (req) => {
       );
     }
 
-    // Calcular total
-    let total = 0;
-    const orderItems = [];
+    let isNatalOrder = false;
+    const today = getTodayDateString();
+    const { data: dailyAvailability, error: dailyAvailabilityError } = await supabase
+      .from('daily_product_availability')
+      .select('product_id')
+      .eq('available_date', today)
+      .eq('is_active', true);
+
+    if (dailyAvailabilityError) {
+      console.error('Erro ao buscar disponibilidade diária:', dailyAvailabilityError);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Failed to verify daily availability' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 },
+      );
+    }
+
+    const dailyAvailabilitySet = new Set((dailyAvailability ?? []).map(({ product_id }) => product_id));
+    const unavailableToday: string[] = [];
+    const orderTypeSet = new Set<'natal' | 'regular'>();
+
+    for (const item of items) {
+      const product = productMap.get(item.productId);
+      if (!product) continue;
+      const isNatal = NATAL_CATEGORIES.has(product.category);
+      orderTypeSet.add(isNatal ? 'natal' : 'regular');
+      if (!isNatal && dailyAvailabilitySet.size > 0 && !dailyAvailabilitySet.has(item.productId)) {
+        unavailableToday.push(item.productId);
+      }
+    }
+
+    if (orderTypeSet.size > 1) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Não é possível misturar produtos de Natal com outros produtos no mesmo pedido.',
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 },
+      );
+    }
+
+    isNatalOrder = orderTypeSet.has('natal');
+
+    if (isNatalOrder) {
+      if (scheduledFor && scheduledFor !== NATAL_SCHEDULE_DATE) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `Pedidos de Natal devem ser agendados para ${NATAL_SCHEDULE_DATE}.`,
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 },
+        );
+      }
+    } else if (scheduledFor) {
+      console.warn('Pedido não natal enviou scheduledFor, ignorando valor:', scheduledFor);
+    }
+
+    if (unavailableToday.length > 0) {
+      console.error('Produtos indisponíveis hoje:', unavailableToday);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'Product not available for today',
+          unavailableToday,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 },
+      );
+    }
+
+    const { data: promotionsData, error: promotionsError } = await supabase
+      .from('promotions')
+      .select(
+        'id, title, description, discount_type, discount_value, applies_to_all, free_shipping, starts_at, ends_at, active, promotion_products ( product_id )',
+      );
+
+    if (promotionsError) {
+      console.error('Erro ao buscar promoções:', promotionsError);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Failed to fetch promotions' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 },
+      );
+    }
+
+    const promotionsRaw = (promotionsData ?? []) as (PromotionRecord & {
+      promotion_products: PromotionProductLink[] | null;
+    })[];
+
+    const normalizedPromotions = promotionsRaw.map((promotion) => ({
+      ...promotion,
+      discount_value: promotion.discount_value !== null ? Number(promotion.discount_value) : null,
+    }));
+
+    const activePromotions = normalizedPromotions.filter((promotion) => isPromotionActive(promotion));
+    console.log('Promoções ativas:', activePromotions.length);
+
+    let subtotal = 0;
+    let discountTotal = 0;
+    let freeShippingApplied = false;
+    const appliedPromotionMap = new Map<string, { id: string; title: string; free_shipping: boolean }>();
+
+    const orderItems: {
+      product_id: string;
+      product_name: string;
+      quantity: number;
+      unit_price: number;
+      total_price: number;
+      discount_amount: number;
+      options: Record<string, unknown> | null;
+    }[] = [];
 
     for (const item of items) {
       const product = productMap.get(item.productId);
       if (!product) continue;
 
       let unitPrice = Number(product.base_price);
-      let quantity = item.quantity;
+      const quantity = item.quantity;
       let productName = product.name;
 
       if (product.category === 'eclair' && item.options?.boxSize) {
@@ -187,20 +414,42 @@ serve(async (req) => {
         }
       }
 
-      const itemTotal = unitPrice * quantity;
-      total += itemTotal;
+      const { discountedUnitPrice, discountAmount, appliedPromotion, freeShipping } =
+        getBestPromotionForProduct(item.productId, unitPrice, activePromotions, quantity);
+
+      const lineTotal = roundCurrency(discountedUnitPrice * quantity);
+      const lineDiscount = roundCurrency(discountAmount);
+
+      subtotal += lineTotal;
+      discountTotal += lineDiscount;
+      if (freeShipping) freeShippingApplied = true;
+      if (appliedPromotion) {
+        appliedPromotionMap.set(appliedPromotion.id, {
+          id: appliedPromotion.id,
+          title: appliedPromotion.title,
+          free_shipping: freeShipping,
+        });
+      }
 
       orderItems.push({
         product_id: item.productId,
         product_name: productName,
         quantity,
         unit_price: unitPrice,
-        total_price: itemTotal,
+        total_price: lineTotal,
+        discount_amount: lineDiscount,
         options: item.options || null,
       });
     }
 
-    console.log('Total calculado:', total);
+    subtotal = roundCurrency(subtotal);
+    discountTotal = roundCurrency(discountTotal);
+
+    const appliedPromotionsList = Array.from(appliedPromotionMap.values());
+
+    console.log('Subtotal (com descontos aplicados):', subtotal);
+    console.log('Total de descontos aplicados:', discountTotal);
+    console.log('Promoções aplicadas:', appliedPromotionsList);
 
     // Validar método de pagamento
     const paymentMethod = customerData?.paymentMethod;
@@ -217,11 +466,20 @@ serve(async (req) => {
     console.log('Método de pagamento:', paymentMethod);
 
     // Calcular taxa de entrega
-    const deliveryFee = customerData.deliveryType === 'entrega' ? 1.5 : 0;
-    const subtotal = total;
-    const finalTotal = subtotal + deliveryFee;
+    const deliveryFee = customerData.deliveryType === 'entrega' && !freeShippingApplied ? 1.5 : 0;
+    const finalTotal = roundCurrency(subtotal + deliveryFee);
+    const scheduledForDate = isNatalOrder ? NATAL_SCHEDULE_DATE : null;
+    const baseNote =
+      typeof customerData.notes === 'string' && customerData.notes.trim().length > 0
+        ? customerData.notes.trim()
+        : '';
+    const natalNote = 'Encomenda de Natal agendada para 24/12 entre 09:00h e 16:30h.';
+    const notesValue =
+      [baseNote, isNatalOrder && !baseNote.includes('24/12') ? natalNote : null]
+        .filter((value): value is string => Boolean(value && value.trim().length > 0))
+        .join('\n') || null;
 
-    console.log('Subtotal:', subtotal);
+    console.log('Subtotal final:', subtotal);
     console.log('Delivery fee:', deliveryFee);
     console.log('Total final:', finalTotal);
 
@@ -238,7 +496,10 @@ serve(async (req) => {
         subtotal: subtotal,
         delivery_fee: deliveryFee,
         total: finalTotal,
-        notes: customerData.notes || null,
+        discount_total: discountTotal,
+        applied_promotions: appliedPromotionsList.length ? appliedPromotionsList : null,
+        notes: notesValue,
+        scheduled_for: scheduledForDate,
         status: 'pendente',
       })
       .select()
@@ -277,15 +538,21 @@ serve(async (req) => {
     console.log('PEDIDO CRIADO COM SUCESSO:', order.id);
 
     return new Response(
-      JSON.stringify({ 
-        success: true, 
+      JSON.stringify({
+        success: true,
         orderId: order.id,
-        total: order.total 
+        total: order.total,
+        subtotal,
+        discountTotal,
+        deliveryFee,
+        appliedPromotions: appliedPromotionsList,
+        freeShipping: freeShippingApplied,
+        scheduledFor: scheduledForDate,
       }),
-      { 
+      {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200 
-      }
+        status: 200,
+      },
     );
 
   } catch (error) {

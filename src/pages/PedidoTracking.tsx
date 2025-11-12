@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { CheckCircle2, Clock, Package, Truck, MapPin, Home, ArrowLeft, Loader2, ShoppingBag } from "lucide-react";
-import { getCartItemsCount } from "@/lib/cart";
+import { getCartItemsCount, getCart } from "@/lib/cart";
 
 interface Order {
   id: string;
@@ -19,9 +19,13 @@ interface Order {
   delivery_address: string | null;
   payment_method: string;
   total: number;
+  discount_total?: number;
+  delivery_fee?: number;
   status: string;
   created_at: string;
   notes: string | null;
+  applied_promotions?: { id: string; title: string; free_shipping?: boolean }[] | null;
+  scheduled_for?: string | null;
 }
 
 interface OrderItem {
@@ -30,7 +34,8 @@ interface OrderItem {
   quantity: number;
   unit_price: number;
   total_price: number;
-  options: any;
+  options: Record<string, unknown> | null;
+  discount_amount?: number;
 }
 
 const PedidoTracking = () => {
@@ -41,22 +46,12 @@ const PedidoTracking = () => {
   const [loading, setLoading] = useState(true);
   const [cartCount, setCartCount] = useState(0);
 
-  useEffect(() => {
-    setCartCount(getCartItemsCount([]));
-    if (orderId) {
-      loadOrder();
-      // Poll para atualizações a cada 5 segundos
-      const interval = setInterval(loadOrder, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [orderId]);
-
-  const loadOrder = async () => {
+  const loadOrder = useCallback(async () => {
     if (!orderId) return;
 
     try {
       const { data: orderData, error: orderError } = await supabase
-        .from('orders')
+        .from<Order>('orders')
         .select('*')
         .eq('id', orderId)
         .single();
@@ -72,19 +67,32 @@ const PedidoTracking = () => {
 
       // Carregar itens do pedido
       const { data: itemsData, error: itemsError } = await supabase
-        .from('order_items')
+        .from<OrderItem>('order_items')
         .select('*')
         .eq('order_id', orderId);
 
       if (itemsError) throw itemsError;
       setOrderItems(itemsData || []);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Erro ao carregar pedido:', error);
       toast.error('Erro ao carregar pedido');
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate, orderId]);
+
+  useEffect(() => {
+    setCartCount(getCartItemsCount(getCart()));
+    if (orderId) {
+      void loadOrder();
+      // Poll para atualizações a cada 5 segundos
+      const interval = setInterval(() => {
+        void loadOrder();
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+    return undefined;
+  }, [loadOrder, orderId]);
 
   const getStatusSteps = () => {
     // Se for recolher, não mostrar "A Caminho", mostrar "Pronto para Recolher"
@@ -298,33 +306,99 @@ const PedidoTracking = () => {
                     </p>
                   </div>
 
+                  {order.scheduled_for && (
+                    <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
+                      <p className="font-medium">Encomenda agendada</p>
+                      <p>
+                        {new Date(order.scheduled_for).toLocaleDateString('pt-PT', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                        })} entre 09:00h e 16:30h.
+                      </p>
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     <p className="text-sm text-foreground/70 mb-2">Itens do Pedido</p>
-                    {orderItems.map((item) => (
-                      <div key={item.id} className="flex justify-between text-sm py-2 border-b last:border-0">
-                        <span className="text-foreground">
-                          {item.quantity}x {item.product_name}
-                        </span>
-                        <span className="font-medium text-foreground">{item.total_price.toFixed(2)}€</span>
-                      </div>
-                    ))}
+                    {orderItems.map((item) => {
+                      const discount = item.discount_amount ?? 0;
+                      const hasDiscount = discount > 0;
+                      return (
+                        <div key={item.id} className="flex justify-between text-sm py-2 border-b last:border-0">
+                          <div className="flex flex-col">
+                            <span className="text-foreground">
+                              {item.quantity}x {item.product_name}
+                            </span>
+                            {hasDiscount && (
+                              <span className="text-xs text-emerald-600">
+                                Promoção: -{discount.toFixed(2)}€
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            {hasDiscount && (
+                              <span className="text-xs text-foreground/60 line-through block">
+                                {(item.unit_price * item.quantity).toFixed(2)}€
+                              </span>
+                            )}
+                            <span className="font-medium text-foreground">{item.total_price.toFixed(2)}€</span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  <div className="pt-4 border-t">
-                    <div className="flex justify-between text-sm mb-2">
+                  <div className="pt-4 border-t space-y-2">
+                    <div className="flex justify-between text-sm">
                       <span className="text-foreground">Subtotal</span>
-                      <span className="text-foreground">{order.total.toFixed(2)}€</span>
+                      <span className="text-foreground">
+                        {(order.subtotal || order.total - (order.delivery_fee || 0)).toFixed(2)}€
+                      </span>
                     </div>
-                    {order.delivery_type === 'entrega' && (
-                      <div className="flex justify-between text-sm mb-2">
+                    {(order.discount_total ?? 0) > 0 && (
+                      <div className="flex justify-between text-sm text-emerald-600">
+                        <span>Descontos</span>
+                        <span>-{(order.discount_total ?? 0).toFixed(2)}€</span>
+                      </div>
+                    )}
+                    {order.delivery_fee !== undefined && (
+                      <div className="flex justify-between text-sm">
                         <span className="text-foreground/70">Taxa de Entrega</span>
-                        <span className="text-foreground/70">1.50€</span>
+                        <span className="text-foreground/70">
+                          {order.delivery_fee === 0 ? "Grátis" : `${order.delivery_fee.toFixed(2)}€`}
+                        </span>
+                      </div>
+                    )}
+                    {order.scheduled_for && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-foreground/70">Agendado para</span>
+                        <span className="text-foreground">
+                          {`${new Date(order.scheduled_for).toLocaleDateString('pt-PT', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                          })} (09:00 - 16:30)`}
+                        </span>
                       </div>
                     )}
                     <div className="flex justify-between font-bold text-lg pt-2 border-t">
                       <span className="text-foreground">Total</span>
                       <span className="text-primary">{order.total.toFixed(2)}€</span>
                     </div>
+                    {order.applied_promotions && order.applied_promotions.length > 0 && (
+                      <div className="text-sm text-foreground/70">
+                        <p className="mb-1">Promoções aplicadas:</p>
+                        <ul className="list-disc list-inside space-y-1">
+                          {order.applied_promotions.map((promotion) => (
+                            <li key={promotion.id}>
+                              {promotion.title}
+                              {promotion.free_shipping ? " • Entrega grátis" : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

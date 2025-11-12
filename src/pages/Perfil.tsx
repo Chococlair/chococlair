@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Header } from "@/components/Header";
@@ -11,9 +11,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { User, LogOut, Lock, Package, Truck } from "lucide-react";
-import { getCartItemsCount } from "@/lib/cart";
+import { User as UserIcon, LogOut, Lock, Package, Truck } from "lucide-react";
+import { getCartItemsCount, getCart } from "@/lib/cart";
 import { Link } from "react-router-dom";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 interface Order {
   id: string;
@@ -27,7 +28,7 @@ const Perfil = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [cartCount, setCartCount] = useState(0);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   
   // Password update
@@ -35,12 +36,27 @@ const Perfil = () => {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  useEffect(() => {
-    setCartCount(getCartItemsCount([]));
-    checkSession();
+  const loadOrders = useCallback(async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      // Buscar pedidos do usuário através do email
+      const { data, error } = await supabase
+        .from<Order>('orders')
+        .select('id, total, status, created_at, delivery_type')
+        .eq('customer_email', session.user.email)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+      setOrders(data ?? []);
+    } catch (error: unknown) {
+      console.error('Erro ao carregar pedidos:', error);
+    }
   }, []);
 
-  const checkSession = async () => {
+  const checkSession = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       toast.error("Por favor, faça login para acessar seu perfil");
@@ -49,27 +65,12 @@ const Perfil = () => {
     }
     setUser(session.user);
     await loadOrders();
-  };
+  }, [loadOrders, navigate]);
 
-  const loadOrders = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      // Buscar pedidos do usuário através do email
-      const { data, error } = await supabase
-        .from('orders')
-        .select('id, total, status, created_at, delivery_type')
-        .eq('customer_email', session.user.email)
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (error) throw error;
-      setOrders(data || []);
-    } catch (error) {
-      console.error('Erro ao carregar pedidos:', error);
-    }
-  };
+  useEffect(() => {
+    setCartCount(getCartItemsCount(getCart()));
+    void checkSession();
+  }, [checkSession]);
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,9 +100,10 @@ const Perfil = () => {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Erro ao atualizar senha:', error);
-      toast.error(error.message || "Erro ao atualizar senha");
+      const message = error instanceof Error ? error.message : "Erro ao atualizar senha";
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -112,7 +114,8 @@ const Perfil = () => {
       await supabase.auth.signOut();
       toast.success("Sessão encerrada com sucesso");
       navigate("/");
-    } catch (error: any) {
+    } catch (error: unknown) {
+      console.error('Erro ao encerrar sessão:', error);
       toast.error("Erro ao encerrar sessão");
     }
   };
@@ -167,7 +170,7 @@ const Perfil = () => {
           <Tabs defaultValue="perfil" className="w-full">
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="perfil">
-                <User className="h-4 w-4 mr-2" />
+                <UserIcon className="h-4 w-4 mr-2" />
                 Perfil
               </TabsTrigger>
               <TabsTrigger value="senha">
@@ -192,7 +195,7 @@ const Perfil = () => {
                 <CardContent className="space-y-6">
                   <div className="flex items-center space-x-4">
                     <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
-                      <User className="h-10 w-10 text-primary" />
+                      <UserIcon className="h-10 w-10 text-primary" />
                     </div>
                     <div>
                       <h3 className="text-xl font-semibold">

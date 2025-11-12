@@ -13,6 +13,19 @@ export interface CartItem {
   image?: string;
 }
 
+import type { PromotionRecord, AppliedPromotion } from "./promotions";
+import { getBestPromotionForProduct, hasFreeShippingPromotion, roundCurrency } from "./promotions";
+
+export const NATAL_CATEGORIES = new Set([
+  "natal_doces",
+  "natal_tabuleiros",
+  "chocotone",
+  "rocambole",
+]);
+
+export const isNatalCategory = (category?: string) =>
+  typeof category === "string" ? NATAL_CATEGORIES.has(category) : false;
+
 const CART_STORAGE_KEY = 'chococlair_cart';
 
 export const getCart = (): CartItem[] => {
@@ -76,7 +89,7 @@ export const clearCart = () => {
 };
 
 export const getCartTotal = (cart: CartItem[]) => {
-  return cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  return roundCurrency(cart.reduce((sum, item) => sum + (item.price * item.quantity), 0));
 };
 
 export const getCartItemsCount = (cart: CartItem[]) => {
@@ -87,14 +100,30 @@ export const getCartItemsCount = (cart: CartItem[]) => {
  * Valida produtos do carrinho contra a lista de produtos disponíveis
  * Remove produtos que não existem mais no banco
  */
-export const validateCartProducts = async (availableProductIds: string[]): Promise<CartItem[] | { validCart: CartItem[]; removedItems: string[] }> => {
+export const validateCartProducts = async (
+  availableProductIds: string[],
+  availableTodayIds?: string[],
+): Promise<CartItem[] | { validCart: CartItem[]; removedItems: string[] }> => {
   const cart = getCart();
   const validCart: CartItem[] = [];
   const removedItems: string[] = [];
+  const availableTodaySet = availableTodayIds ? new Set(availableTodayIds) : null;
+  let cartType: 'natal' | 'regular' | null = null;
 
   for (const item of cart) {
     // Verificar se o productId principal existe
     let isValid = availableProductIds.includes(item.productId);
+    const natalItem = isNatalCategory(item.category);
+
+    if (cartType === null) {
+      cartType = natalItem ? 'natal' : 'regular';
+    } else if ((cartType === 'natal' && !natalItem) || (cartType === 'regular' && natalItem)) {
+      removedItems.push(item.name);
+      continue;
+    }
+
+    const isAvailableToday =
+      availableTodaySet && !natalItem ? availableTodaySet.has(item.productId) : true;
     
     // Para éclairs, verificar também os IDs dos sabores
     if (item.category === 'eclair' && item.options?.flavors) {
@@ -104,7 +133,7 @@ export const validateCartProducts = async (availableProductIds: string[]): Promi
       isValid = isValid && allFlavorsValid;
     }
 
-    if (isValid) {
+    if (isValid && isAvailableToday) {
       validCart.push(item);
     } else {
       removedItems.push(item.name);
@@ -121,4 +150,76 @@ export const validateCartProducts = async (availableProductIds: string[]): Promi
   }
 
   return validCart;
+};
+
+export interface CartItemPricing extends CartItem {
+  discountedUnitPrice: number;
+  lineTotal: number;
+  discountTotal: number;
+  appliedPromotion?: AppliedPromotion;
+  freeShippingApplied: boolean;
+}
+
+export interface CartPricingSummary {
+  items: CartItemPricing[];
+  subtotal: number;
+  discountTotal: number;
+  total: number;
+  freeShipping: boolean;
+  appliedPromotionIds: string[];
+}
+
+export const applyPromotionsToCart = (
+  cart: CartItem[],
+  promotions: PromotionRecord[],
+): CartItemPricing[] =>
+  cart.map((item) => {
+    const { discountedUnitPrice, discountTotal, appliedPromotion, freeShipping } = getBestPromotionForProduct(
+      item.productId,
+      item.price,
+      promotions,
+      item.quantity,
+    );
+
+    return {
+      ...item,
+      discountedUnitPrice,
+      lineTotal: roundCurrency(discountedUnitPrice * item.quantity),
+      discountTotal,
+      appliedPromotion,
+      freeShippingApplied: freeShipping,
+    };
+  });
+
+export const calculateCartPricing = (
+  cart: CartItem[],
+  promotions: PromotionRecord[],
+): CartPricingSummary => {
+  const pricedItems = applyPromotionsToCart(cart, promotions);
+
+  const subtotal = roundCurrency(cart.reduce((sum, item) => sum + item.price * item.quantity, 0));
+  const discountTotal = roundCurrency(pricedItems.reduce((sum, item) => sum + item.discountTotal, 0));
+  const total = roundCurrency(pricedItems.reduce((sum, item) => sum + item.lineTotal, 0));
+
+  const appliedPromotionIds = Array.from(
+    new Set(
+      pricedItems
+        .map((item) => item.appliedPromotion?.promotionId)
+        .filter(Boolean) as string[],
+    ),
+  );
+
+  const productIds = cart.map((item) => item.productId);
+  const freeShipping =
+    hasFreeShippingPromotion(promotions, productIds) ||
+    pricedItems.some((item) => item.freeShippingApplied);
+
+  return {
+    items: pricedItems,
+    subtotal,
+    discountTotal,
+    total,
+    freeShipping,
+    appliedPromotionIds,
+  };
 };

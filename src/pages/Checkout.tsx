@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -10,45 +10,134 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
-import { getCart, clearCart, getCartTotal, CartItem } from "@/lib/cart";
+import { getCart, clearCart, CartItem, calculateCartPricing, validateCartProducts, isNatalCategory } from "@/lib/cart";
+import type { CartPricingSummary } from "@/lib/cart";
+import { getActivePromotions, type PromotionRecord } from "@/lib/promotions";
 import { Loader2 } from "lucide-react";
+import type { User } from "@supabase/supabase-js";
+
+type DeliveryType = "recolher" | "entrega";
+type PaymentMethod = "dinheiro" | "mbway";
+
+type CreateOrderResponse = {
+  success: boolean;
+  orderId?: string;
+  error?: string;
+  [key: string]: unknown;
+};
+
+const getTodayDateString = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = `${now.getMonth() + 1}`.padStart(2, "0");
+  const day = `${now.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 const Checkout = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [pricing, setPricing] = useState<CartPricingSummary | null>(null);
+  const [promotions, setPromotions] = useState<PromotionRecord[]>([]);
   
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [deliveryType, setDeliveryType] = useState<"recolher" | "entrega">("recolher");
+  const [deliveryType, setDeliveryType] = useState<DeliveryType>("recolher");
   const [deliveryAddress, setDeliveryAddress] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"dinheiro" | "mbway">("dinheiro");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("dinheiro");
   const [notes, setNotes] = useState("");
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        toast.error("Por favor, faça login para continuar");
-        navigate("/auth");
-        return;
-      }
-      setUser(session.user);
-      setEmail(session.user.email || "");
-      setName(session.user.user_metadata?.name || "");
-    };
+  const loadCartWithPromotions = useCallback(async (items?: CartItem[]) => {
+    const cartData = items ?? getCart();
 
-    checkAuth();
-    const cartData = getCart();
     if (cartData.length === 0) {
-      toast.error("Seu carrinho está vazio");
-      navigate("/carrinho");
+      setCart([]);
+      setPricing(null);
+      setPromotions([]);
+      return cartData;
+    }
+
+    try {
+      const today = getTodayDateString();
+      const [
+        { data: productsData, error: productsError },
+        { data: availabilityData, error: availabilityError },
+        { data: promotionsData, error: promotionsError },
+      ] = await Promise.all([
+        supabase.from('products').select('id').eq('available', true),
+        supabase
+          .from('daily_product_availability')
+          .select('product_id')
+          .eq('available_date', today)
+          .eq('is_active', true),
+        supabase
+          .from('promotions')
+          .select(
+            'id, title, description, discount_type, discount_value, applies_to_all, free_shipping, starts_at, ends_at, active, promotion_products ( product_id )',
+          ),
+      ]);
+
+      if (productsError) throw productsError;
+      if (availabilityError) throw availabilityError;
+      if (promotionsError) throw promotionsError;
+
+      const availableProductIds = (productsData ?? []).map((product) => product.id);
+      const availableTodayIds = (availabilityData ?? []).map(({ product_id }) => product_id);
+      const validationResult = await validateCartProducts(availableProductIds, availableTodayIds);
+
+      const sanitizedCart = Array.isArray(validationResult) ? validationResult : validationResult.validCart;
+      if (!Array.isArray(validationResult) && validationResult.removedItems.length > 0) {
+        toast.warning(
+          `${validationResult.removedItems.length} produto(s) foram removidos do carrinho (indisponíveis para hoje ou incompatíveis com outros itens).`,
+          { duration: 5000 },
+        );
+      }
+
+      setCart(sanitizedCart);
+
+      const activePromos = getActivePromotions((promotionsData ?? []) as PromotionRecord[]);
+      setPromotions(activePromos);
+      setPricing(calculateCartPricing(sanitizedCart, activePromos));
+      return sanitizedCart;
+    } catch (error) {
+      console.error('Erro ao carregar dados para o checkout:', error);
+      toast.error('Não foi possível validar o carrinho. Tente novamente.');
+      setPromotions([]);
+      setPricing(calculateCartPricing(cartData, []));
+      setCart(cartData);
+      return cartData;
+    }
+  }, []);
+
+  const checkAuth = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast.error("Por favor, faça login para continuar");
+      navigate("/auth");
       return;
     }
-    setCart(cartData);
+    setUser(session.user);
+    setEmail(session.user.email || "");
+    setName((session.user.user_metadata?.name as string | undefined) || "");
   }, [navigate]);
+
+  useEffect(() => {
+    const init = async () => {
+      await checkAuth();
+      const cartData = getCart();
+      if (cartData.length === 0) {
+        toast.error("Seu carrinho está vazio");
+        navigate("/carrinho");
+        return;
+      }
+      await loadCartWithPromotions(cartData);
+    };
+
+    void init();
+  }, [checkAuth, navigate, loadCartWithPromotions]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,6 +160,11 @@ const Checkout = () => {
       }
 
       // Prepare order data
+      const autoNote = isNatalOrder
+        ? "Encomenda de Natal agendada para 24/12 entre 09:00h e 16:30h."
+        : "";
+      const combinedNotes = [notes.trim(), autoNote].filter(Boolean).join("\n") || null;
+
       const orderData = {
         items: cart.map(item => ({
           productId: item.productId,
@@ -85,8 +179,9 @@ const Checkout = () => {
           deliveryType,
           deliveryAddress: deliveryType === "entrega" ? deliveryAddress.trim() : null,
           paymentMethod,
-          notes: notes.trim() || null,
+          notes: combinedNotes,
         },
+        scheduledFor: isNatalOrder ? "2024-12-24" : null,
       };
 
       console.log('Submitting order:', orderData);
@@ -131,14 +226,14 @@ const Checkout = () => {
         console.log('📥 Response ok:', response.ok);
         console.log('📥 Response headers:', Object.fromEntries(response.headers.entries()));
 
-        let responseData;
+        let responseData: CreateOrderResponse | null = null;
         try {
           const text = await response.text();
           console.log('📥 Response text (raw):', text);
-          responseData = text ? JSON.parse(text) : null;
+          responseData = text ? (JSON.parse(text) as CreateOrderResponse) : null;
           console.log('📥 Response data (parsed):', responseData);
-        } catch (e) {
-          console.error('Erro ao parsear resposta:', e);
+        } catch (parseError: unknown) {
+          console.error('Erro ao parsear resposta:', parseError);
           throw new Error('Erro ao processar resposta do servidor');
         }
 
@@ -155,31 +250,57 @@ const Checkout = () => {
           throw new Error(errorMsg);
         }
         
-        const data = responseData;
+        if (!responseData.orderId) {
+          throw new Error('Resposta inválida do servidor: orderId ausente.');
+        }
 
-        console.log('✅ Order created successfully:', data);
+        console.log('✅ Order created successfully:', responseData);
 
         // Clear cart
         clearCart();
 
         toast.success("Pedido realizado com sucesso!");
         // Redirecionar para página de acompanhamento
-        navigate(`/pedido/${data.orderId}`);
-      } catch (error: any) {
+        navigate(`/pedido/${responseData.orderId}`);
+      } catch (error: unknown) {
         console.error('Checkout error:', error);
-        toast.error(error.message || "Erro ao finalizar pedido");
+        const message = error instanceof Error ? error.message : "Erro ao finalizar pedido";
+        toast.error(message);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Checkout error (outer):', error);
-      toast.error(error.message || "Erro ao finalizar pedido");
+      const message = error instanceof Error ? error.message : "Erro ao finalizar pedido";
+      toast.error(message);
     } finally {
       setLoading(false);
     }
   };
 
-  const subtotal = getCartTotal(cart);
-  const deliveryFee = deliveryType === "entrega" ? 1.5 : 0;
-  const total = subtotal + deliveryFee;
+  const isNatalOrder = useMemo(
+    () => cart.length > 0 && cart.every((item) => isNatalCategory(item.category)),
+    [cart],
+  );
+
+  const subtotalFallback = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const subtotal = pricing?.subtotal ?? subtotalFallback;
+  const discountTotal = pricing?.discountTotal ?? 0;
+  const productsTotal = pricing?.total ?? subtotal;
+  const deliveryFee = deliveryType === "entrega" && !(pricing?.freeShipping ?? false) ? 1.5 : 0;
+  const total = productsTotal + deliveryFee;
+  const pricingMap = useMemo(() => {
+    if (!pricing) return new Map<string, ReturnType<typeof calculateCartPricing>["items"][number]>();
+    return new Map(pricing.items.map((item) => [item.id, item]));
+  }, [pricing]);
+  const appliedPromotionTitles = useMemo(() => {
+    if (!pricing) return [];
+    return Array.from(
+      new Set(
+        pricing.items
+          .map((item) => item.appliedPromotion?.title)
+          .filter(Boolean) as string[],
+      ),
+    );
+  }, [pricing]);
 
   if (!user || cart.length === 0) {
     return (
@@ -203,6 +324,13 @@ const Checkout = () => {
                   <CardTitle>Informações do Cliente</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {isNatalOrder && (
+                    <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
+                      <p className="font-medium">Encomenda de Natal</p>
+                      <p>Entrega ou recolha disponível apenas no dia 24/12, entre 09:00h e 16:30h.</p>
+                      <p className="mt-1">Pagamento em dinheiro ou MB WAY no momento da entrega/recolha.</p>
+                    </div>
+                  )}
                   <div>
                     <Label htmlFor="name">Nome *</Label>
                     <Input
@@ -244,14 +372,24 @@ const Checkout = () => {
                   <CardTitle>Tipo de Entrega</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <RadioGroup value={deliveryType} onValueChange={(value: any) => setDeliveryType(value)}>
+                  <RadioGroup
+                    value={deliveryType}
+                    onValueChange={(value) => {
+                      if (value === "recolher" || value === "entrega") {
+                        setDeliveryType(value);
+                      }
+                    }}
+                  >
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="recolher" id="recolher" />
                       <Label htmlFor="recolher">Recolher na loja (Grátis)</Label>
                     </div>
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="entrega" id="entrega" />
-                      <Label htmlFor="entrega">Entrega ao domicílio (+1,50€)</Label>
+                      <Label htmlFor="entrega">
+                        Entrega ao domicílio{" "}
+                        {pricing?.freeShipping ? "(Grátis com promoção)" : "(+1,50€)"}
+                      </Label>
                     </div>
                   </RadioGroup>
 
@@ -276,7 +414,14 @@ const Checkout = () => {
                   <CardTitle>Método de Pagamento</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <RadioGroup value={paymentMethod} onValueChange={(value: any) => setPaymentMethod(value)}>
+                  <RadioGroup
+                    value={paymentMethod}
+                    onValueChange={(value) => {
+                      if (value === "dinheiro" || value === "mbway") {
+                        setPaymentMethod(value);
+                      }
+                    }}
+                  >
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="dinheiro" id="dinheiro" />
                       <Label htmlFor="dinheiro">Dinheiro (na entrega/recolha)</Label>
@@ -322,29 +467,69 @@ const Checkout = () => {
                 <CardTitle>Resumo do Pedido</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {cart.map((item) => (
-                  <div key={item.id} className="flex justify-between text-sm">
-                    <div>
-                      <p className="font-medium">{item.name}</p>
-                      <p className="text-foreground/70">Quantidade: {item.quantity}</p>
+                {cart.map((item) => {
+                  const pricingItem = pricingMap.get(item.id);
+                  const lineTotal = pricingItem?.lineTotal ?? item.price * item.quantity;
+                  const hasDiscount = pricingItem ? pricingItem.discountTotal > 0 : false;
+
+                  return (
+                    <div key={item.id} className="flex justify-between text-sm">
+                      <div>
+                        <p className="font-medium">{item.name}</p>
+                        <p className="text-foreground/70">Quantidade: {item.quantity}</p>
+                        {hasDiscount && pricingItem && (
+                          <p className="text-xs text-emerald-600">
+                            Promoção: -{pricingItem.discountTotal.toFixed(2)}€
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        {hasDiscount && (
+                          <p className="text-xs text-foreground/60 line-through">
+                            {(item.price * item.quantity).toFixed(2)}€
+                          </p>
+                        )}
+                        <p className="font-medium">{lineTotal.toFixed(2)}€</p>
+                      </div>
                     </div>
-                    <p className="font-medium">{(item.price * item.quantity).toFixed(2)}€</p>
-                  </div>
-                ))}
+                  );
+                })}
                 
                 <div className="border-t pt-4 space-y-2">
                   <div className="flex justify-between">
                     <p>Subtotal</p>
                     <p>{subtotal.toFixed(2)}€</p>
                   </div>
+                  {discountTotal > 0 && (
+                    <div className="flex justify-between text-emerald-600 text-sm">
+                      <p>Descontos</p>
+                      <p>-{discountTotal.toFixed(2)}€</p>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <p>Taxa de entrega</p>
-                    <p>{deliveryFee.toFixed(2)}€</p>
+                    <p>{deliveryFee === 0 ? "Grátis" : `${deliveryFee.toFixed(2)}€`}</p>
                   </div>
                   <div className="flex justify-between font-bold text-lg border-t pt-2">
                     <p>Total</p>
                     <p>{total.toFixed(2)}€</p>
                   </div>
+                  {isNatalOrder && (
+                    <div className="mt-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
+                      <p className="font-medium">Encomenda agendada para 24/12</p>
+                      <p>Entrega ou recolha entre 09:00h e 16:30h. Pagamento no ato da entrega/recolha.</p>
+                    </div>
+                  )}
+                  {appliedPromotionTitles.length > 0 && (
+                    <div className="pt-2 text-sm text-foreground/70 space-y-1">
+                      <p>Promoções aplicadas:</p>
+                      <ul className="list-disc list-inside space-y-1">
+                        {appliedPromotionTitles.map((title) => (
+                          <li key={title}>{title}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

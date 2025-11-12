@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
@@ -6,10 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowLeft, ShoppingCart, Minus, Plus, CheckCircle2, X } from "lucide-react";
+import { ArrowLeft, ShoppingCart, Minus, Plus, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { getCart, getCartItemsCount, addToCart } from "@/lib/cart";
+import { getCart, getCartItemsCount, addToCart, type CartItem, isNatalCategory } from "@/lib/cart";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -29,6 +28,17 @@ interface Product {
   image_url: string | null;
 }
 
+type BoxSizeOption = "2" | "3" | "6";
+type MassType = "chocolate" | "branca";
+
+const getTodayDateString = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = `${now.getMonth() + 1}`.padStart(2, "0");
+  const day = `${now.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const Produto = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -37,14 +47,80 @@ const Produto = () => {
   const [loading, setLoading] = useState(true);
   const [cartCount, setCartCount] = useState(0);
   const [quantity, setQuantity] = useState(1);
-  const [boxSize, setBoxSize] = useState<string>("2");
+  const [boxSize, setBoxSize] = useState<BoxSizeOption>("2");
   const [selectedFlavors, setSelectedFlavors] = useState<string[]>([]);
-  const [massType, setMassType] = useState<string>("chocolate");
+  const [massType, setMassType] = useState<MassType>("chocolate");
   const [showCartDialog, setShowCartDialog] = useState(false);
+  const [availableToday, setAvailableToday] = useState<boolean | null>(null);
+  const [isNatalProduct, setIsNatalProduct] = useState(false);
+
+  const loadAllEclairs = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from<Product>('products')
+        .select('*')
+        .eq('category', 'eclair')
+        .eq('available', true)
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      setAllEclairs(data ?? []);
+    } catch (error: unknown) {
+      console.error('Erro ao carregar éclairs:', error);
+    }
+  }, []);
+
+  const loadProduct = useCallback(
+    async (productId: string) => {
+      try {
+        const { data, error } = await supabase
+          .from<Product>('products')
+          .select('*')
+          .eq('id', productId)
+          .maybeSingle();
+
+        if (error) throw error;
+        if (!data) {
+          toast.error('Produto não encontrado');
+          navigate('/produtos');
+          return;
+        }
+        setProduct(data);
+        setIsNatalProduct(isNatalCategory(data.category));
+
+        const today = getTodayDateString();
+        const { data: availabilityData, error: availabilityError } = await supabase
+          .from('daily_product_availability')
+          .select('product_id')
+          .eq('product_id', productId)
+          .eq('available_date', today)
+          .eq('is_active', true)
+          .maybeSingle();
+
+        if (availabilityError && availabilityError.code !== 'PGRST116') {
+          throw availabilityError;
+        }
+
+        setAvailableToday(Boolean(availabilityData));
+
+        // Se for éclair, carregar todos os éclairs disponíveis
+        if (data.category === 'eclair') {
+          await loadAllEclairs();
+        }
+      } catch (error: unknown) {
+        console.error('Erro ao carregar produto:', error);
+        toast.error('Erro ao carregar produto');
+        navigate('/produtos');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [loadAllEclairs, navigate],
+  );
 
   useEffect(() => {
     if (id) {
-      loadProduct(id);
+      void loadProduct(id);
     }
     setCartCount(getCartItemsCount(getCart()));
     
@@ -54,7 +130,7 @@ const Produto = () => {
     
     window.addEventListener('cart-updated', handleCartUpdate);
     return () => window.removeEventListener('cart-updated', handleCartUpdate);
-  }, [id]);
+  }, [id, loadProduct]);
 
   // Quando o tamanho da caixa muda, resetar sabores selecionados
   useEffect(() => {
@@ -63,57 +139,8 @@ const Produto = () => {
     }
   }, [boxSize, product?.category]);
 
-  const loadProduct = async (productId: string) => {
-    try {
-      // @ts-ignore - Tipos do Supabase serão gerados automaticamente
-      const { data, error } = await supabase
-        // @ts-ignore
-        .from('products')
-        .select('*')
-        .eq('id', productId)
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!data) {
-        toast.error('Produto não encontrado');
-        navigate('/produtos');
-        return;
-      }
-      setProduct(data);
-
-      // Se for éclair, carregar todos os éclairs disponíveis
-      if (data.category === 'eclair') {
-        loadAllEclairs();
-      }
-    } catch (error) {
-      console.error('Erro ao carregar produto:', error);
-      toast.error('Erro ao carregar produto');
-      navigate('/produtos');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadAllEclairs = async () => {
-    try {
-      // @ts-ignore
-      const { data, error } = await supabase
-        // @ts-ignore
-        .from('products')
-        .select('*')
-        .eq('category', 'eclair')
-        .eq('available', true)
-        .order('name', { ascending: true });
-
-      if (error) throw error;
-      setAllEclairs(data || []);
-    } catch (error) {
-      console.error('Erro ao carregar éclairs:', error);
-    }
-  };
-
   const handleFlavorAdd = (flavorId: string) => {
-    const size = parseInt(boxSize);
+    const size = Number(boxSize);
     if (selectedFlavors.length < size) {
       setSelectedFlavors([...selectedFlavors, flavorId]);
     } else {
@@ -133,13 +160,35 @@ const Produto = () => {
   const handleAddToCart = () => {
     if (!product) return;
 
+    if (isNatalProduct) {
+      const currentCart = getCart();
+      const cartHasItems = currentCart.length > 0;
+      const cartHasNatal = currentCart.every((item) => isNatalCategory(item.category));
+      if (cartHasItems && !cartHasNatal) {
+        toast.error('Para encomendas de Natal, finalize ou limpe o carrinho atual antes de adicionar este produto.');
+        return;
+      }
+    } else {
+      const currentCart = getCart();
+      const cartHasNatal = currentCart.some((item) => isNatalCategory(item.category));
+      if (cartHasNatal) {
+        toast.error('O carrinho contém produtos de Natal. Conclua ou limpe a encomenda antes de adicionar outros produtos.');
+        return;
+      }
+    }
+
+    if (availableToday === false && !isNatalProduct) {
+      toast.error('Este produto não está disponível para pedidos hoje.');
+      return;
+    }
+
     let finalPrice = Number(product.base_price);
     let finalQuantity = quantity;
-    const options: any = {};
+    const options: CartItem["options"] = {};
 
     // Para éclairs, validar sabores selecionados
     if (product.category === 'eclair') {
-      const size = parseInt(boxSize);
+      const size = Number(boxSize);
       
       if (selectedFlavors.length !== size) {
         toast.error(`Por favor, selecione exatamente ${size} sabores para a caixa de ${size} unidades`);
@@ -149,7 +198,7 @@ const Produto = () => {
       finalPrice = Number(product.base_price) * size;
       finalQuantity = quantity; // Quantidade de caixas
       options.boxSize = size;
-      options.flavors = selectedFlavors;
+      options.flavors = [...selectedFlavors];
     }
 
     // Para rocamboles, adicionar tipo de massa
@@ -181,8 +230,10 @@ const Produto = () => {
   const getCategoryLabel = (cat: string) => {
     const labels: Record<string, string> = {
       eclair: "Éclair",
-      chocotone: "Chocotone",
-      rocambole: "Rocambole"
+      chocotone: "Doce de Natal",
+      rocambole: "Doce de Natal",
+      natal_doces: "Doce de Natal",
+      natal_tabuleiros: "Tabuleiro de Natal",
     };
     return labels[cat] || cat;
   };
@@ -204,12 +255,14 @@ const Produto = () => {
   }
 
   const displayPrice = product.category === 'eclair' 
-    ? Number(product.base_price) * parseInt(boxSize)
+    ? Number(product.base_price) * Number(boxSize)
     : Number(product.base_price);
 
-  const canAddToCart = product.category === 'eclair' 
-    ? selectedFlavors.length === parseInt(boxSize)
-    : true;
+  const isAvailableToday = isNatalProduct ? true : availableToday !== false;
+
+  const canAddToCart = product.category === 'eclair'
+    ? isAvailableToday && selectedFlavors.length === Number(boxSize)
+    : isAvailableToday;
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -242,11 +295,34 @@ const Produto = () => {
 
             {/* Detalhes do Produto */}
             <div className="flex flex-col">
-              <Badge className="w-fit mb-4">
-                {getCategoryLabel(product.category)}
-              </Badge>
-              
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                <Badge className="w-fit">
+                  {getCategoryLabel(product.category)}
+                </Badge>
+                {(isNatalProduct || availableToday !== null) && (
+                  <Badge
+                    variant="outline"
+                    className={
+                      isAvailableToday
+                        ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/40"
+                        : "bg-muted text-foreground/60 border-muted-foreground/20"
+                    }
+                  >
+                    {isNatalProduct ? "Encomenda Natal" : isAvailableToday ? "Disponível hoje" : "Indisponível hoje"}
+                  </Badge>
+                )}
+              </div>
+
               <h1 className="text-4xl font-bold mb-4">{product.name}</h1>
+              {isNatalProduct ? (
+                <p className="text-sm text-primary font-medium mb-4">
+                  Encomenda exclusiva de Natal. Entregas e recolhas disponíveis apenas no dia 24/12 das 09:00h às 16:30h.
+                </p>
+              ) : availableToday === false ? (
+                <p className="text-sm text-destructive font-medium mb-4">
+                  Este produto não está disponível para pedidos hoje. Veja o menu diário ou escolha outra opção.
+                </p>
+              ) : null}
               
               {product.description && (
                 <p className="text-lg text-foreground/80 mb-6">
@@ -263,7 +339,7 @@ const Produto = () => {
                 <>
                   <div className="mb-6">
                     <Label className="text-base mb-3 block">Tamanho da Caixa</Label>
-                    <RadioGroup value={boxSize} onValueChange={setBoxSize}>
+                    <RadioGroup value={boxSize} onValueChange={(value) => setBoxSize(value as BoxSizeOption)}>
                       <div className="flex items-center space-x-2 mb-2">
                         <RadioGroupItem value="2" id="box-2" />
                         <Label htmlFor="box-2" className="cursor-pointer">
@@ -296,7 +372,7 @@ const Produto = () => {
                         allEclairs.map((eclair) => {
                           // Contar quantas vezes este sabor está selecionado
                           const count = selectedFlavors.filter(id => id === eclair.id).length;
-                          const canAdd = selectedFlavors.length < parseInt(boxSize);
+                          const canAdd = selectedFlavors.length < Number(boxSize);
                           
                           return (
                             <div key={eclair.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors">
@@ -349,7 +425,7 @@ const Produto = () => {
               {product.category === 'rocambole' && (
                 <div className="mb-6">
                   <Label className="text-base mb-3 block">Tipo de Massa</Label>
-                  <RadioGroup value={massType} onValueChange={setMassType}>
+                  <RadioGroup value={massType} onValueChange={(value) => setMassType(value as MassType)}>
                     <div className="flex items-center space-x-2 mb-2">
                       <RadioGroupItem value="chocolate" id="massa-chocolate" />
                       <Label htmlFor="massa-chocolate" className="cursor-pointer">
@@ -400,9 +476,11 @@ const Produto = () => {
                 disabled={!canAddToCart}
               >
                 <ShoppingCart className="h-5 w-5" />
-                {product.category === 'eclair' && !canAddToCart 
-                  ? `Selecione ${parseInt(boxSize) - selectedFlavors.length} sabores restantes`
-                  : 'Adicionar ao Carrinho'}
+                {isAvailableToday
+                  ? product.category === 'eclair' && selectedFlavors.length !== Number(boxSize)
+                    ? `Selecione ${Number(boxSize) - selectedFlavors.length} sabores restantes`
+                    : 'Adicionar ao Carrinho'
+                  : 'Indisponível hoje'}
               </Button>
             </div>
           </div>
