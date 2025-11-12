@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, ChangeEvent } from "react";
+import type { ComponentType } from "react";
 import type { ComponentType } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -107,6 +108,7 @@ interface Product {
   base_price: number;
   available: boolean;
   image_url?: string | null;
+  description?: string;
 }
 
 interface PromotionProductLink {
@@ -188,10 +190,39 @@ const defaultPromotionFormState: PromotionFormState = {
   active: true,
 };
 
+interface ProductFormState {
+  id?: string;
+  name: string;
+  category: string;
+  basePrice: string;
+  description: string;
+  imageUrl: string;
+  available: boolean;
+}
+
+const defaultProductFormState: ProductFormState = {
+  name: "",
+  category: "eclair",
+  basePrice: "",
+  description: "",
+  imageUrl: "",
+  available: true,
+};
+
+const PRODUCT_CATEGORIES = [
+  { value: "eclair", label: "Éclair" },
+  { value: "chocotone", label: "Chocotone" },
+  { value: "rocambole", label: "Rocambole" },
+  { value: "natal_doces", label: "Doce de Natal" },
+  { value: "natal_tabuleiros", label: "Tabuleiro de Natal" },
+];
+
 const PRODUCT_CATEGORY_LABELS: Record<string, string> = {
   eclair: "Éclairs",
   chocotone: "Chocotones",
   rocambole: "Rocamboles",
+  natal_doces: "Doces de Natal",
+  natal_tabuleiros: "Tabuleiros de Natal",
 };
 
 const Admin = () => {
@@ -218,6 +249,30 @@ const Admin = () => {
   const [orderItemsSummary, setOrderItemsSummary] = useState<OrderItemRow[]>([]);
   const [productTotals, setProductTotals] = useState<ProductAggregate[]>([]);
   const [ordersPerDaySummary, setOrdersPerDaySummary] = useState<OrdersPerDaySummary[]>([]);
+  const [productDialogOpen, setProductDialogOpen] = useState(false);
+  const [productForm, setProductForm] = useState<ProductFormState>({ ...defaultProductFormState });
+  const [productImageFile, setProductImageFile] = useState<File | null>(null);
+  const [productImagePreview, setProductImagePreview] = useState<string | null>(null);
+  const [productSaving, setProductSaving] = useState(false);
+  const [productDeleting, setProductDeleting] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+
+  const loadAllProducts = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select<Product[]>('id, name, category, base_price, available, image_url, description')
+        .order('category', { ascending: true })
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      setAllProducts(data ?? []);
+    } catch (error) {
+      console.error('Erro ao carregar produtos:', error);
+      toast.error('Erro ao carregar produtos');
+    }
+  }, []);
 
   const isNatalOrder = useCallback((order: Order) => Boolean(order.scheduled_for), []);
 
@@ -258,6 +313,151 @@ const Admin = () => {
     });
     setOrdersPerDaySummary(Array.from(perDayMap.values()).sort((a, b) => b.date.localeCompare(a.date)));
   }, [isNatalOrder]);
+
+  const resetProductForm = useCallback(() => {
+    setProductForm({ ...defaultProductFormState });
+    if (productImagePreview) {
+      URL.revokeObjectURL(productImagePreview);
+    }
+    setProductImageFile(null);
+    setProductImagePreview(null);
+  }, [productImagePreview]);
+
+  const handleOpenNewProduct = useCallback(() => {
+    resetProductForm();
+    setProductDialogOpen(true);
+  }, [resetProductForm]);
+
+  const handleEditProduct = useCallback((product: Product) => {
+    setProductForm({
+      id: product.id,
+      name: product.name,
+      category: product.category,
+      basePrice: product.base_price.toString(),
+      description: product.description ?? "",
+      imageUrl: product.image_url ?? "",
+      available: product.available,
+    });
+    setProductImageFile(null);
+    setProductImagePreview(product.image_url ?? null);
+    setProductDialogOpen(true);
+  }, []);
+
+  const handleProductInputChange = useCallback((field: keyof ProductFormState, value: string | boolean) => {
+    setProductForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
+
+  const handleProductImageChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Por favor selecione um ficheiro de imagem válido.");
+      return;
+    }
+    if (productImagePreview) {
+      URL.revokeObjectURL(productImagePreview);
+    }
+    setProductImageFile(file);
+    setProductImagePreview(URL.createObjectURL(file));
+  }, [productImagePreview]);
+
+  const uploadProductImage = useCallback(
+    async (file: File): Promise<string | null> => {
+      const ext = file.name.split(".").pop();
+      const path = `products/${crypto.randomUUID()}.${ext ?? "jpg"}`;
+      const { error: uploadError } = await supabase.storage.from("products-images").upload(path, file, {
+        cacheControl: "3600",
+        upsert: true,
+      });
+      if (uploadError) {
+        console.error("Erro ao carregar imagem:", uploadError);
+        toast.error("Não foi possível carregar a imagem. Verifique o bucket 'products-images'.");
+        return null;
+      }
+      const { data: publicUrlData } = supabase.storage.from("products-images").getPublicUrl(path);
+      return publicUrlData?.publicUrl ?? null;
+    },
+    [],
+  );
+
+  const handleSaveProduct = useCallback(async () => {
+    if (!productForm.name.trim()) {
+      toast.error("Informe o nome do produto.");
+      return;
+    }
+    if (!productForm.basePrice.trim()) {
+      toast.error("Informe o preço base.");
+      return;
+    }
+
+    const parsedPrice = Number(productForm.basePrice.replace(",", "."));
+    if (Number.isNaN(parsedPrice) || parsedPrice <= 0) {
+      toast.error("Informe um preço base válido.");
+      return;
+    }
+
+    setProductSaving(true);
+
+    try {
+      let imageUrl = productForm.imageUrl || null;
+      if (productImageFile) {
+        const uploadedUrl = await uploadProductImage(productImageFile);
+        if (!uploadedUrl) {
+          setProductSaving(false);
+          return;
+        }
+        imageUrl = uploadedUrl;
+      }
+
+      const payload = {
+        name: productForm.name.trim(),
+        category: productForm.category,
+        base_price: parsedPrice,
+        description: productForm.description.trim() || null,
+        image_url: imageUrl,
+        available: productForm.available,
+      };
+
+      if (productForm.id) {
+        const { error } = await supabase.from("products").update(payload).eq("id", productForm.id);
+        if (error) throw error;
+        toast.success("Produto atualizado com sucesso.");
+      } else {
+        const { error } = await supabase.from("products").insert(payload);
+        if (error) throw error;
+        toast.success("Produto criado com sucesso.");
+      }
+
+      await loadAllProducts();
+      resetProductForm();
+      setProductDialogOpen(false);
+    } catch (error) {
+      console.error("Erro ao salvar produto:", error);
+      toast.error("Não foi possível salvar o produto.");
+    } finally {
+      setProductSaving(false);
+    }
+  }, [productForm, productImageFile, loadAllProducts, resetProductForm, uploadProductImage]);
+
+  const handleDeleteProduct = useCallback(async () => {
+    if (!productToDelete) return;
+    setProductDeleting(true);
+    try {
+      const { error } = await supabase.from("products").delete().eq("id", productToDelete.id);
+      if (error) throw error;
+      toast.success("Produto removido com sucesso.");
+      await loadAllProducts();
+    } catch (error) {
+      console.error("Erro ao remover produto:", error);
+      toast.error("Não foi possível remover o produto.");
+    } finally {
+      setProductDeleting(false);
+      setProductToDelete(null);
+    }
+  }, [productToDelete, loadAllProducts]);
   const groupedProducts = useMemo(() => {
     const groups: Record<string, Product[]> = {};
     allProducts.forEach((product) => {
@@ -309,22 +509,6 @@ const Admin = () => {
       return [];
     }
   }, [updateAnalytics]);
-
-  const loadAllProducts = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('products')
-        .select<Product[]>('id, name, category, base_price, available, image_url')
-        .order('category', { ascending: true })
-        .order('name', { ascending: true });
-
-      if (error) throw error;
-      setAllProducts(data ?? []);
-    } catch (error) {
-      console.error('Erro ao carregar produtos:', error);
-      toast.error('Erro ao carregar produtos');
-    }
-  }, []);
 
   const loadDailyProducts = useCallback(async (date: string) => {
     setLoadingDailySelection(true);
@@ -1060,6 +1244,18 @@ const Admin = () => {
   const filteredOrders = getFilteredOrders();
   const filteredDailyOrders = filteredOrders.filter((order) => !isNatalOrder(order));
   const filteredNatalOrders = filteredOrders.filter((order) => isNatalOrder(order));
+  const filteredProductsList = useMemo(() => {
+    const term = productSearch.trim().toLowerCase();
+    if (!term) return allProducts;
+    return allProducts.filter((product) => {
+      const categoryLabel = PRODUCT_CATEGORY_LABELS[product.category] ?? product.category;
+      return (
+        product.name.toLowerCase().includes(term) ||
+        categoryLabel.toLowerCase().includes(term) ||
+        product.category.toLowerCase().includes(term)
+      );
+    });
+  }, [allProducts, productSearch]);
 
   const renderOrdersTable = (
     ordersToRender: Order[],
@@ -1330,7 +1526,7 @@ const Admin = () => {
 
         {/* Tabs para organizar */}
         <Tabs defaultValue="visao-geral" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="visao-geral">
               <TrendingUp className="h-4 w-4 mr-2" />
               Visão Geral
@@ -1342,6 +1538,10 @@ const Admin = () => {
             <TabsTrigger value="pedidos">
               <Package className="h-4 w-4 mr-2" />
               Pedidos
+            </TabsTrigger>
+            <TabsTrigger value="produtos-admin">
+              <ShoppingBag className="h-4 w-4 mr-2" />
+              Produtos
             </TabsTrigger>
             <TabsTrigger value="gestao">
               <ShoppingBag className="h-4 w-4 mr-2" />
@@ -1861,6 +2061,104 @@ const Admin = () => {
               </CardContent>
             </Card>
           </TabsContent>
+
+          <TabsContent value="produtos-admin" className="space-y-4">
+            <Card>
+              <CardHeader className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <CardTitle>Gestão de Produtos</CardTitle>
+                  <p className="text-sm text-foreground/70">
+                    Adicione, edite ou remova produtos disponívels no catálogo. Certifique-se de que o bucket <strong>products-images</strong> existe no Supabase Storage.
+                  </p>
+                </div>
+                <Button onClick={handleOpenNewProduct}>Novo produto</Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                  <Input
+                    placeholder="Pesquisar por nome ou categoria"
+                    value={productSearch}
+                    onChange={(event) => setProductSearch(event.target.value)}
+                    className="md:w-72"
+                  />
+                  <span className="text-sm text-foreground/70">
+                    A mostrar {filteredProductsList.length} de {allProducts.length} produtos
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-foreground font-semibold">Imagem</TableHead>
+                        <TableHead className="text-foreground font-semibold">Produto</TableHead>
+                        <TableHead className="text-foreground font-semibold">Categoria</TableHead>
+                        <TableHead className="text-foreground font-semibold">Preço Base</TableHead>
+                        <TableHead className="text-foreground font-semibold">Estado</TableHead>
+                        <TableHead className="text-foreground font-semibold">Ações</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredProductsList.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="py-8 text-center text-foreground/70">
+                            Nenhum produto encontrado para o filtro aplicado.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredProductsList.map((product) => (
+                          <TableRow key={product.id}>
+                            <TableCell>
+                              {product.image_url ? (
+                                <img
+                                  src={product.image_url}
+                                  alt={product.name}
+                                  className="h-16 w-16 rounded-md object-cover"
+                                />
+                              ) : (
+                                <span className="text-xs text-foreground/50">Sem imagem</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col">
+                                <span className="font-medium text-foreground">{product.name}</span>
+                                {product.description && (
+                                  <span className="text-xs text-foreground/70 line-clamp-2">
+                                    {product.description}
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="secondary">
+                                {PRODUCT_CATEGORY_LABELS[product.category] ?? product.category}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{formatCurrency(product.base_price)}</TableCell>
+                            <TableCell>
+                              <Badge variant={product.available ? "default" : "secondary"}>
+                                {product.available ? "Disponível" : "Indisponível"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-2">
+                                <Button size="sm" variant="outline" onClick={() => handleEditProduct(product)}>
+                                  Editar
+                                </Button>
+                                <Button size="sm" variant="destructive" onClick={() => setProductToDelete(product)}>
+                                  Remover
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
       </main>
 
@@ -2288,6 +2586,141 @@ const Admin = () => {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deleteLoading ? "Excluindo..." : "Excluir Pedido"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Dialog de Produtos */}
+      <Dialog
+        open={productDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            resetProductForm();
+            setProductDialogOpen(false);
+          } else {
+            setProductDialogOpen(true);
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{productForm.id ? "Editar produto" : "Novo produto"}</DialogTitle>
+            <DialogDescription className="text-foreground">
+              Preencha as informações abaixo. Utilize o bucket <strong>products-images</strong> no Supabase Storage para armazenar as fotos.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label>Nome</Label>
+              <Input
+                placeholder="Ex: Torta Chococlair"
+                value={productForm.name}
+                onChange={(event) => handleProductInputChange("name", event.target.value)}
+              />
+            </div>
+
+            <div className="grid gap-2 md:grid-cols-2 md:gap-4">
+              <div className="grid gap-2">
+                <Label>Categoria</Label>
+                <Select
+                  value={productForm.category}
+                  onValueChange={(value) => handleProductInputChange("category", value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione uma categoria" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRODUCT_CATEGORIES.map((category) => (
+                      <SelectItem key={category.value} value={category.value}>
+                        {category.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Preço base (€)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Ex: 25.00"
+                  value={productForm.basePrice}
+                  onChange={(event) => handleProductInputChange("basePrice", event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Disponível</p>
+                <p className="text-xs text-foreground/70">Controla a visibilidade do produto no catálogo.</p>
+              </div>
+              <Switch
+                checked={productForm.available}
+                onCheckedChange={(checked) => handleProductInputChange("available", checked)}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Descrição</Label>
+              <Textarea
+                placeholder="Texto opcional para apresentar o produto"
+                value={productForm.description}
+                onChange={(event) => handleProductInputChange("description", event.target.value)}
+                rows={4}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Imagem</Label>
+              <Input type="file" accept="image/*" onChange={handleProductImageChange} />
+              {(productImagePreview || productForm.imageUrl) && (
+                <div className="mt-2">
+                  <p className="text-xs text-foreground/70 mb-2">Pré-visualização:</p>
+                  <img
+                    src={productImagePreview ?? productForm.imageUrl}
+                    alt={productForm.name || "Pré-visualização"}
+                    className="h-40 w-full rounded-md object-cover"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                resetProductForm();
+                setProductDialogOpen(false);
+              }}
+              disabled={productSaving}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveProduct} disabled={productSaving}>
+              {productSaving ? "A guardar..." : productForm.id ? "Guardar alterações" : "Criar produto"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Exclusão de Produto */}
+      <AlertDialog open={!!productToDelete} onOpenChange={(open) => !open && setProductToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover produto</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem a certeza de que deseja remover "{productToDelete?.name}"? Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={productDeleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteProduct} disabled={productDeleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {productDeleting ? "A remover..." : "Remover"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
