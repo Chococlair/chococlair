@@ -5,6 +5,7 @@ export interface CartItem {
   price: number;
   quantity: number;
   category: string;
+  isNatal?: boolean;
   options?: {
     boxSize?: number; // Para éclairs: 2, 3 ou 6
     flavors?: string[]; // Para éclairs: IDs dos sabores selecionados
@@ -20,7 +21,11 @@ export const NATAL_CATEGORIES = new Set([
   "natal_doces",
   "natal_tabuleiros",
   "chocotone",
+  "chocotones",
   "rocambole",
+  "rocamboles",
+  "tortas_chococlair",
+  "trutas",
 ]);
 
 export const isNatalCategory = (category?: string) =>
@@ -47,7 +52,11 @@ export const addToCart = (item: Omit<CartItem, 'id'>) => {
   );
 
   if (existingIndex >= 0) {
-    cart[existingIndex].quantity += item.quantity;
+    const existingItem = cart[existingIndex];
+    existingItem.quantity += item.quantity;
+    if (existingItem.isNatal === undefined && item.isNatal !== undefined) {
+      existingItem.isNatal = item.isNatal;
+    }
   } else {
     cart.push({
       ...item,
@@ -113,7 +122,7 @@ export const validateCartProducts = async (
   for (const item of cart) {
     // Verificar se o productId principal existe
     let isValid = availableProductIds.includes(item.productId);
-    const natalItem = isNatalCategory(item.category);
+    const natalItem = item.isNatal ?? isNatalCategory(item.category);
 
     if (cartType === null) {
       cartType = natalItem ? 'natal' : 'regular';

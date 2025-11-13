@@ -23,9 +23,16 @@ interface Product {
   id: string;
   name: string;
   category: string;
+  category_id: string;
   base_price: number;
   description: string | null;
   image_url: string | null;
+  product_categories: {
+    id: string;
+    name: string;
+    slug: string;
+    is_natal: boolean;
+  } | null;
 }
 
 type BoxSizeOption = "2" | "3" | "6";
@@ -38,6 +45,12 @@ const getTodayDateString = () => {
   const day = `${now.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
+
+const formatCategoryLabel = (slug: string) =>
+  slug
+    .split("_")
+    .map((part) => (part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)))
+    .join(" ");
 
 const Produto = () => {
   const { id } = useParams();
@@ -75,7 +88,9 @@ const Produto = () => {
       try {
         const { data, error } = await supabase
           .from<Product>('products')
-          .select('*')
+          .select(
+            'id, name, category, category_id, base_price, description, image_url, product_categories ( id, name, slug, is_natal )',
+          )
           .eq('id', productId)
           .maybeSingle();
 
@@ -86,7 +101,8 @@ const Produto = () => {
           return;
         }
         setProduct(data);
-        setIsNatalProduct(isNatalCategory(data.category));
+        const natalFlag = data.product_categories?.is_natal ?? isNatalCategory(data.category);
+        setIsNatalProduct(Boolean(natalFlag));
 
         const today = getTodayDateString();
         const { data: availabilityData, error: availabilityError } = await supabase
@@ -160,21 +176,21 @@ const Produto = () => {
   const handleAddToCart = () => {
     if (!product) return;
 
+    const currentCart = getCart();
+    const cartHasItems = currentCart.length > 0;
+    const cartHasNatal = currentCart.some((item) => item.isNatal ?? isNatalCategory(item.category));
+    const cartOnlyNatal = currentCart.length > 0
+      ? currentCart.every((item) => item.isNatal ?? isNatalCategory(item.category))
+      : false;
+
     if (isNatalProduct) {
-      const currentCart = getCart();
-      const cartHasItems = currentCart.length > 0;
-      const cartHasNatal = currentCart.every((item) => isNatalCategory(item.category));
-      if (cartHasItems && !cartHasNatal) {
+      if (cartHasItems && !cartOnlyNatal) {
         toast.error('Para encomendas de Natal, finalize ou limpe o carrinho atual antes de adicionar este produto.');
         return;
       }
-    } else {
-      const currentCart = getCart();
-      const cartHasNatal = currentCart.some((item) => isNatalCategory(item.category));
-      if (cartHasNatal) {
-        toast.error('O carrinho contém produtos de Natal. Conclua ou limpe a encomenda antes de adicionar outros produtos.');
-        return;
-      }
+    } else if (cartHasNatal) {
+      toast.error('O carrinho contém produtos de Natal. Conclua ou limpe a encomenda antes de adicionar outros produtos.');
+      return;
     }
 
     if (availableToday === false && !isNatalProduct) {
@@ -185,6 +201,7 @@ const Produto = () => {
     let finalPrice = Number(product.base_price);
     let finalQuantity = quantity;
     const options: CartItem["options"] = {};
+    const isRocamboleCategory = product.category === 'rocamboles' || product.category === 'rocambole';
 
     // Para éclairs, validar sabores selecionados
     if (product.category === 'eclair') {
@@ -202,7 +219,7 @@ const Produto = () => {
     }
 
     // Para rocamboles, adicionar tipo de massa
-    if (product.category === 'rocambole') {
+    if (isRocamboleCategory) {
       options.massType = massType;
     }
 
@@ -219,23 +236,13 @@ const Produto = () => {
       price: finalPrice,
       quantity: finalQuantity,
       category: product.category,
+      isNatal: isNatalProduct,
       options,
       image: product.image_url || undefined
     });
 
     // Abrir dialog ao invés de apenas mostrar toast
     setShowCartDialog(true);
-  };
-
-  const getCategoryLabel = (cat: string) => {
-    const labels: Record<string, string> = {
-      eclair: "Éclair",
-      chocotone: "Doce de Natal",
-      rocambole: "Doce de Natal",
-      natal_doces: "Doce de Natal",
-      natal_tabuleiros: "Tabuleiro de Natal",
-    };
-    return labels[cat] || cat;
   };
 
   if (loading) {
@@ -257,6 +264,8 @@ const Produto = () => {
   const displayPrice = product.category === 'eclair' 
     ? Number(product.base_price) * Number(boxSize)
     : Number(product.base_price);
+  const categoryDisplay = product.product_categories?.name ?? formatCategoryLabel(product.category);
+  const isRocamboleCategory = product.category === 'rocamboles' || product.category === 'rocambole';
 
   const isAvailableToday = isNatalProduct ? true : availableToday !== false;
 
@@ -297,7 +306,7 @@ const Produto = () => {
             <div className="flex flex-col">
               <div className="flex flex-wrap items-center gap-2 mb-4">
                 <Badge className="w-fit">
-                  {getCategoryLabel(product.category)}
+                  {categoryDisplay}
                 </Badge>
                 {(isNatalProduct || availableToday !== null) && (
                   <Badge
@@ -422,7 +431,7 @@ const Produto = () => {
                 </>
               )}
 
-              {product.category === 'rocambole' && (
+              {isRocamboleCategory && (
                 <div className="mb-6">
                   <Label className="text-base mb-3 block">Tipo de Massa</Label>
                   <RadioGroup value={massType} onValueChange={(value) => setMassType(value as MassType)}>

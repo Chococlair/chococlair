@@ -12,9 +12,16 @@ interface Product {
   id: string;
   name: string;
   category: string;
+  category_id: string;
   base_price: number;
   description: string | null;
   image_url: string | null;
+  product_categories: {
+    id: string;
+    name: string;
+    slug: string;
+    is_natal: boolean;
+  } | null;
 }
 
 interface ProductView extends Product {
@@ -22,48 +29,50 @@ interface ProductView extends Product {
   appliedPromotion?: ReturnType<typeof getBestPromotionForProduct>["appliedPromotion"];
   availableToday: boolean;
   isNatal?: boolean;
+  categoryName: string;
   natalSectionKey?: string | null;
 }
 
-interface NatalSection {
-  key: string;
-  title: string;
-  description?: string;
-  match: (product: Product) => boolean;
-}
+const formatCategoryLabel = (slug: string) =>
+  slug
+    .split("_")
+    .map((part) => (part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)))
+    .join(" ");
 
-const NATAL_SECTIONS: NatalSection[] = [
+const NATAL_SECTION_CONFIG: Record<
+  string,
   {
-    key: "chocotones",
+    title: string;
+    description?: string;
+  }
+> = {
+  chocotones: {
     title: "Chocotones",
     description: "Clássicos natalícios recheados com sabores irresistíveis.",
-    match: (product) => product.name.toLowerCase().includes("chocotone"),
   },
-  {
-    key: "tortas",
+  tortas_chococlair: {
     title: "Tortas Chococlair",
     description: "Tortas especiais feitas por encomenda para a ceia.",
-    match: (product) => product.name.toLowerCase().includes("torta"),
   },
-  {
-    key: "rocamboles",
+  rocamboles: {
     title: "Rocamboles",
     description: "Rocamboles artesanais para adoçar o Natal.",
-    match: (product) => product.name.toLowerCase().includes("rocambole"),
   },
-  {
-    key: "trutas",
+  trutas: {
     title: "Trutas Doces",
-    description: "Trutas recheadas de batata doce, uma tradição natalícia.",
-    match: (product) => product.name.toLowerCase().includes("truta"),
+    description: "Trutas tradicionais com recheio generoso.",
   },
-  {
-    key: "tabuleiros",
-    title: "Tabuleiros Salgados",
-    description: "Pratos prontos para partilhar na mesa de Natal.",
-    match: (product) => product.name.toLowerCase().includes("tabuleiro"),
+  natal_doces: {
+    title: "Doces de Natal",
+    description: "Clássicos natalícios preparados com carinho.",
   },
-];
+  natal_tabuleiros: {
+    title: "Tabuleiros de Natal",
+    description: "Pratos pensados para partilhar em família.",
+  },
+};
+
+const NATAL_SECTION_ORDER = ["chocotones", "tortas_chococlair", "trutas", "rocamboles", "natal_doces", "natal_tabuleiros"];
 
 const getTodayDateString = () => {
   const now = new Date();
@@ -88,7 +97,9 @@ const Produtos = () => {
       ] = await Promise.all([
         supabase
           .from<Product>('products')
-          .select('*')
+          .select(
+            'id, name, category, category_id, base_price, description, image_url, product_categories ( id, name, slug, is_natal )',
+          )
           .eq('available', true)
           .order('category', { ascending: true })
           .order('name', { ascending: true }),
@@ -119,15 +130,18 @@ const Produtos = () => {
           activePromotions,
           1,
         );
-        const natalSection = NATAL_SECTIONS.find((section) => section.match(product)) || null;
-        const isNatal = Boolean(natalSection);
+        const categoryInfo = product.product_categories;
+        const categoryName = categoryInfo?.name ?? formatCategoryLabel(product.category);
+        const isNatal = Boolean(categoryInfo?.is_natal);
+        const natalSectionKey = isNatal ? product.category : null;
         return {
           ...product,
           discountedPrice: discountedUnitPrice,
           appliedPromotion,
           availableToday: isNatal || availabilitySet.has(product.id),
           isNatal,
-          natalSectionKey: natalSection?.key ?? null,
+          categoryName,
+          natalSectionKey,
         };
       });
 
@@ -176,20 +190,38 @@ const Produtos = () => {
   };
 
   const natalGroups = useMemo(() => {
-    const groups: Record<string, ProductView[]> = {};
-    NATAL_SECTIONS.forEach((section) => {
-      groups[section.key] = [];
-    });
+    const groups: Record<string, { title: string; description?: string; products: ProductView[] }> = {};
     products.forEach((product) => {
-      if (product.natalSectionKey) {
-        if (!groups[product.natalSectionKey]) {
-          groups[product.natalSectionKey] = [];
-        }
-        groups[product.natalSectionKey].push(product);
+      if (!product.isNatal) return;
+      const slug = product.natalSectionKey ?? product.category;
+      const config = NATAL_SECTION_CONFIG[slug];
+      const title = config?.title ?? product.categoryName ?? formatCategoryLabel(slug);
+      const description = config?.description;
+      if (!groups[slug]) {
+        groups[slug] = { title, description, products: [] };
       }
+      groups[slug].products.push(product);
     });
     return groups;
   }, [products]);
+
+  const orderedNatalSections = useMemo(() => {
+    const keys = Object.keys(natalGroups);
+    if (keys.length === 0) return [];
+    const orderedKeys = NATAL_SECTION_ORDER.filter((slug) => keys.includes(slug));
+    const remainingKeys = keys
+      .filter((slug) => !NATAL_SECTION_ORDER.includes(slug))
+      .sort((a, b) =>
+        (natalGroups[a]?.title ?? formatCategoryLabel(a)).localeCompare(
+          natalGroups[b]?.title ?? formatCategoryLabel(b),
+          'pt-PT',
+        ),
+      );
+    return [...orderedKeys, ...remainingKeys].map((key) => ({
+      key,
+      ...natalGroups[key],
+    }));
+  }, [natalGroups]);
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -225,6 +257,7 @@ const Produtos = () => {
                       id={product.id}
                       name={product.name}
                       category={product.category}
+                    categoryLabel={product.categoryName}
                       price={Number(product.base_price)}
                       discountedPrice={product.discountedPrice}
                       promotion={product.appliedPromotion || undefined}
@@ -251,6 +284,7 @@ const Produtos = () => {
                       id={product.id}
                       name={product.name}
                       category={product.category}
+                      categoryLabel={product.categoryName}
                       price={Number(product.base_price)}
                       discountedPrice={product.discountedPrice}
                       promotion={product.appliedPromotion || undefined}
@@ -264,11 +298,12 @@ const Produtos = () => {
               </TabsContent>
 
               <TabsContent value="natal" className="mt-8 space-y-10">
-                {NATAL_SECTIONS.map((section) => {
-                  const items = natalGroups[section.key] ?? [];
-                  if (items.length === 0) return null;
-
-                  return (
+                {orderedNatalSections.length === 0 ? (
+                  <div className="text-center py-10 text-foreground/70">
+                    Nenhum produto de Natal disponível no momento.
+                  </div>
+                ) : (
+                  orderedNatalSections.map((section) => (
                     <div key={section.key} className="space-y-3">
                       <div>
                         <h3 className="text-2xl font-semibold text-foreground">
@@ -281,7 +316,7 @@ const Produtos = () => {
                         )}
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        {items.map((product) => (
+                        {section.products.map((product) => (
                           <ProductCard
                             key={product.id}
                             id={product.id}
@@ -294,12 +329,13 @@ const Produtos = () => {
                             description={product.description || undefined}
                             availableToday={product.availableToday}
                             isNatal
+                            categoryLabel={product.categoryName}
                           />
                         ))}
                       </div>
                     </div>
-                  );
-                })}
+                  ))
+                )}
               </TabsContent>
             </Tabs>
           )}

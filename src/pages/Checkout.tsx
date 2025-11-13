@@ -277,7 +277,7 @@ const Checkout = () => {
   };
 
   const isNatalOrder = useMemo(
-    () => cart.length > 0 && cart.every((item) => isNatalCategory(item.category)),
+    () => cart.length > 0 && cart.every((item) => item.isNatal ?? isNatalCategory(item.category)),
     [cart],
   );
 

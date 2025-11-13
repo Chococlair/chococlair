@@ -20,6 +20,8 @@ interface DailyProduct {
   id: string;
   name: string;
   category: string;
+  categoryName: string;
+  isNatal: boolean;
   description: string | null;
   image_url: string | null;
   base_price: number;
@@ -27,19 +29,17 @@ interface DailyProduct {
   appliedPromotion?: AppliedPromotion;
 }
 
+const formatCategoryLabel = (slug: string) =>
+  slug
+    .split("_")
+    .map((part) => (part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)))
+    .join(" ");
+
 const formatDateInput = (date: Date) => {
   const year = date.getFullYear();
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
-};
-
-const PRODUCT_CATEGORY_LABELS: Record<string, string> = {
-  eclair: "Éclairs",
-  chocotone: "Doces de Natal",
-  rocambole: "Doces de Natal",
-  natal_doces: "Doces de Natal",
-  natal_tabuleiros: "Tabuleiros de Natal",
 };
 
 const Index = () => {
@@ -83,7 +83,7 @@ const Index = () => {
       try {
         const { data, error } = await supabase
           .from('products')
-          .select('id, name, category, base_price, description, image_url')
+          .select('id, name, category, base_price, description, image_url, product_categories ( name, slug, is_natal )')
           .eq('available', true)
           .order('created_at', { ascending: false })
           .limit(20);
@@ -91,9 +91,8 @@ const Index = () => {
         if (error) throw error;
 
         const mapped: DailyProduct[] = (data ?? [])
-          .filter(({ category }) => category !== 'natal_doces' && category !== 'natal_tabuleiros')
-          .slice(0, 8)
           .map((product) => {
+            const categoryInfo = (product as { product_categories?: { name?: string; is_natal?: boolean } }).product_categories;
             const basePrice = Number(product.base_price);
             const { discountedUnitPrice, appliedPromotion } = getBestPromotionForProduct(
               product.id,
@@ -101,12 +100,20 @@ const Index = () => {
               promos,
             );
             return {
-              ...product,
+              id: product.id,
+              name: product.name,
+              category: product.category,
+              categoryName: categoryInfo?.name ?? formatCategoryLabel(product.category),
+              isNatal: Boolean(categoryInfo?.is_natal),
+              description: product.description,
+              image_url: product.image_url,
               base_price: basePrice,
               discountedPrice: discountedUnitPrice,
               appliedPromotion,
             };
-          });
+          })
+          .filter((product) => !product.isNatal)
+          .slice(0, 8);
 
         setFeaturedProducts(mapped);
       } catch (featuredError) {
@@ -154,7 +161,7 @@ const Index = () => {
 
       const { data: productsData, error: productsError } = await supabase
         .from('products')
-        .select('id, name, category, base_price, description, image_url')
+        .select('id, name, category, base_price, description, image_url, product_categories ( name, is_natal )')
         .in('id', productIds)
         .order('category', { ascending: true })
         .order('name', { ascending: true });
@@ -162,6 +169,7 @@ const Index = () => {
       if (productsError) throw productsError;
 
       const productsWithPromotions: DailyProduct[] = (productsData ?? []).map((product) => {
+        const categoryInfo = (product as { product_categories?: { name?: string; is_natal?: boolean } }).product_categories;
         const basePrice = Number(product.base_price);
         const { discountedUnitPrice, appliedPromotion } = getBestPromotionForProduct(
           product.id,
@@ -170,7 +178,13 @@ const Index = () => {
         );
 
         return {
-          ...product,
+          id: product.id,
+          name: product.name,
+          category: product.category,
+          categoryName: categoryInfo?.name ?? formatCategoryLabel(product.category),
+          isNatal: Boolean(categoryInfo?.is_natal),
+          description: product.description,
+          image_url: product.image_url,
           base_price: basePrice,
           discountedPrice: discountedUnitPrice,
           appliedPromotion,
@@ -318,32 +332,38 @@ const Index = () => {
               </div>
             ) : (
               <div className="space-y-10">
-                {Object.entries(groupedDailyProducts).map(([category, products]) => (
-                  <div key={category} className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-2xl font-semibold text-foreground">
-                        {PRODUCT_CATEGORY_LABELS[category] ?? category}
-                      </h3>
-                      <span className="text-sm text-foreground/60">{products.length} opção(ões)</span>
+                {Object.entries(groupedDailyProducts).map(([category, products]) => {
+                  const categoryLabel = products[0]?.categoryName ?? formatCategoryLabel(category);
+                  const isNatal = products[0]?.isNatal ?? false;
+                  return (
+                    <div key={category} className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-2xl font-semibold text-foreground">
+                          {categoryLabel}
+                        </h3>
+                        <span className="text-sm text-foreground/60">{products.length} opção(ões)</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {products.map((product) => (
+                          <ProductCard
+                            key={product.id}
+                            id={product.id}
+                            name={product.name}
+                            category={product.category}
+                            categoryLabel={product.categoryName}
+                            price={product.base_price}
+                            discountedPrice={product.discountedPrice}
+                            promotion={product.appliedPromotion}
+                            image={product.image_url ?? undefined}
+                            description={product.description ?? undefined}
+                            availableToday
+                            isNatal={product.isNatal ?? isNatal}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                      {products.map((product) => (
-                        <ProductCard
-                          key={product.id}
-                          id={product.id}
-                          name={product.name}
-                          category={product.category}
-                          price={product.base_price}
-                          discountedPrice={product.discountedPrice}
-                          promotion={product.appliedPromotion}
-                          image={product.image_url ?? undefined}
-                          description={product.description ?? undefined}
-                          availableToday
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -379,13 +399,14 @@ const Index = () => {
                     id={product.id}
                     name={product.name}
                     category={product.category}
+                    categoryLabel={product.categoryName}
                     price={product.base_price}
                     discountedPrice={product.discountedPrice}
                     promotion={product.appliedPromotion}
                     image={product.image_url ?? undefined}
                     description={product.description ?? undefined}
                     availableToday={dailyProducts.some((item) => item.id === product.id)}
-                    isNatal={product.category === 'natal_doces' || product.category === 'natal_tabuleiros'}
+                    isNatal={product.isNatal}
                   />
                 ))}
               </div>

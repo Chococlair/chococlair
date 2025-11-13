@@ -10,7 +10,11 @@ const NATAL_CATEGORIES = new Set([
   "natal_doces",
   "natal_tabuleiros",
   "chocotone",
+  "chocotones",
   "rocambole",
+  "rocamboles",
+  "tortas_chococlair",
+  "trutas",
 ]);
 
 const NATAL_SCHEDULE_DATE = '2024-12-24';
@@ -42,6 +46,17 @@ interface PromotionRecord {
   active: boolean;
   promotion_products?: PromotionProductLink[] | null;
 }
+
+type ProductRow = {
+  id: string;
+  name: string;
+  base_price: number;
+  category: string;
+  available: boolean;
+  product_categories?: {
+    is_natal?: boolean | null;
+  } | null;
+};
 
 const roundCurrency = (value: number) => Math.round(value * 100) / 100;
 
@@ -232,7 +247,7 @@ serve(async (req) => {
 
     const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('id, name, base_price, category, available')
+      .select('id, name, base_price, category, available, product_categories ( is_natal )')
       .in('id', Array.from(allProductIds));
 
     if (productsError) {
@@ -245,7 +260,8 @@ serve(async (req) => {
 
     console.log('Produtos encontrados:', products?.length || 0);
 
-    const productMap = new Map(products?.map(p => [p.id, p]) || []);
+    const typedProducts = (products ?? []) as ProductRow[];
+    const productMap = new Map<string, ProductRow>(typedProducts.map((p) => [p.id, p]));
 
     // Validar todos os produtos existem
     const missingProducts: string[] = [];
@@ -306,7 +322,7 @@ serve(async (req) => {
     for (const item of items) {
       const product = productMap.get(item.productId);
       if (!product) continue;
-      const isNatal = NATAL_CATEGORIES.has(product.category);
+      const isNatal = Boolean(product.product_categories?.is_natal ?? NATAL_CATEGORIES.has(product.category));
       orderTypeSet.add(isNatal ? 'natal' : 'regular');
       if (!isNatal && dailyAvailabilitySet.size > 0 && !dailyAvailabilitySet.has(item.productId)) {
         unavailableToday.push(item.productId);

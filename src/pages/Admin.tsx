@@ -105,10 +105,12 @@ interface Product {
   id: string;
   name: string;
   category: string;
+  category_id: string;
   base_price: number;
   available: boolean;
   image_url?: string | null;
   description?: string;
+  product_categories?: Category | null;
 }
 
 interface PromotionProductLink {
@@ -140,6 +142,13 @@ interface PromotionFormState {
   startsAt: string;
   endsAt: string;
   active: boolean;
+}
+
+interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  is_natal: boolean;
 }
 
 const formatDateInput = (date: Date) => {
@@ -194,6 +203,7 @@ interface ProductFormState {
   id?: string;
   name: string;
   category: string;
+  categoryId: string;
   basePrice: string;
   description: string;
   imageUrl: string;
@@ -202,28 +212,28 @@ interface ProductFormState {
 
 const defaultProductFormState: ProductFormState = {
   name: "",
-  category: "eclair",
+  category: "",
+  categoryId: "",
   basePrice: "",
   description: "",
   imageUrl: "",
   available: true,
 };
 
-const PRODUCT_CATEGORIES = [
-  { value: "eclair", label: "Éclair" },
-  { value: "chocotone", label: "Chocotone" },
-  { value: "rocambole", label: "Rocambole" },
-  { value: "natal_doces", label: "Doce de Natal" },
-  { value: "natal_tabuleiros", label: "Tabuleiro de Natal" },
-];
+const slugifyCategory = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
 
-const PRODUCT_CATEGORY_LABELS: Record<string, string> = {
-  eclair: "Éclairs",
-  chocotone: "Chocotones",
-  rocambole: "Rocamboles",
-  natal_doces: "Doces de Natal",
-  natal_tabuleiros: "Tabuleiros de Natal",
-};
+const formatCategoryLabel = (slug: string) =>
+  slug
+    .split("_")
+    .map((part) => (part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)))
+    .join(" ");
 
 const Admin = () => {
   const navigate = useNavigate();
@@ -238,6 +248,7 @@ const Admin = () => {
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [selectedMenuDate, setSelectedMenuDate] = useState<string>(getTodayDateString());
   const [dailyProductIds, setDailyProductIds] = useState<string[]>([]);
   const [loadingDailySelection, setLoadingDailySelection] = useState(false);
@@ -257,20 +268,40 @@ const Admin = () => {
   const [productDeleting, setProductDeleting] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [categoryForm, setCategoryForm] = useState({ name: "", isNatal: false });
 
   const loadAllProducts = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('products')
-        .select<Product[]>('id, name, category, base_price, available, image_url, description')
+        .select(
+          'id, name, category, category_id, base_price, available, image_url, description, product_categories ( id, name, slug, is_natal )',
+        )
         .order('category', { ascending: true })
         .order('name', { ascending: true });
 
       if (error) throw error;
-      setAllProducts(data ?? []);
+      setAllProducts((data ?? []) as Product[]);
     } catch (error) {
       console.error('Erro ao carregar produtos:', error);
       toast.error('Erro ao carregar produtos');
+    }
+  }, []);
+
+  const loadCategories = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('product_categories')
+        .select('id, name, slug, is_natal')
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      setCategories(data ?? []);
+    } catch (error) {
+      console.error('Erro ao carregar categorias:', error);
+      toast.error('Erro ao carregar categorias');
     }
   }, []);
 
@@ -315,13 +346,18 @@ const Admin = () => {
   }, [isNatalOrder]);
 
   const resetProductForm = useCallback(() => {
-    setProductForm({ ...defaultProductFormState });
+    const defaultCategory = categories.find((category) => category.slug === "eclair") ?? categories[0];
+    setProductForm({
+      ...defaultProductFormState,
+      category: defaultCategory?.slug ?? "",
+      categoryId: defaultCategory?.id ?? "",
+    });
     if (productImagePreview) {
       URL.revokeObjectURL(productImagePreview);
     }
     setProductImageFile(null);
     setProductImagePreview(null);
-  }, [productImagePreview]);
+  }, [categories, productImagePreview]);
 
   const handleOpenNewProduct = useCallback(() => {
     resetProductForm();
@@ -333,6 +369,7 @@ const Admin = () => {
       id: product.id,
       name: product.name,
       category: product.category,
+      categoryId: product.category_id,
       basePrice: product.base_price.toString(),
       description: product.description ?? "",
       imageUrl: product.image_url ?? "",
@@ -350,6 +387,26 @@ const Admin = () => {
     }));
   }, []);
 
+  const handleProductCategoryChange = useCallback((value: string) => {
+    if (value === "__new__") {
+      setCategoryForm({ name: "", isNatal: false });
+      setCategoryDialogOpen(true);
+      return;
+    }
+
+    const selected = categories.find((category) => category.id === value);
+    if (!selected) {
+      toast.error("Categoria selecionada não encontrada.");
+      return;
+    }
+
+    setProductForm((prev) => ({
+      ...prev,
+      categoryId: selected.id,
+      category: selected.slug,
+    }));
+  }, [categories]);
+
   const handleProductImageChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -363,6 +420,64 @@ const Admin = () => {
     setProductImageFile(file);
     setProductImagePreview(URL.createObjectURL(file));
   }, [productImagePreview]);
+
+  const resetCategoryForm = useCallback(() => {
+    setCategoryForm({ name: "", isNatal: false });
+  }, []);
+
+  const handleSaveCategory = useCallback(async () => {
+    const trimmedName = categoryForm.name.trim();
+    if (!trimmedName) {
+      toast.error("Informe o nome da categoria.");
+      return;
+    }
+
+    const slug = slugifyCategory(trimmedName);
+    if (!slug) {
+      toast.error("Não foi possível gerar um identificador para esta categoria. Ajuste o nome e tente novamente.");
+      return;
+    }
+
+    if (categories.some((category) => category.slug === slug)) {
+      toast.error("Já existe uma categoria com este nome.");
+      return;
+    }
+
+    setCategorySaving(true);
+    try {
+      const { data, error } = await supabase
+        .from('product_categories')
+        .insert({
+          name: trimmedName,
+          slug,
+          is_natal: categoryForm.isNatal,
+        })
+        .select('id, name, slug, is_natal')
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) throw new Error("Falha ao criar categoria.");
+
+      const newCategory = data as Category;
+      setCategories((prev) =>
+        [...prev, newCategory].sort((a, b) => a.name.localeCompare(b.name, 'pt-PT')),
+      );
+      setProductForm((prev) => ({
+        ...prev,
+        categoryId: newCategory.id,
+        category: newCategory.slug,
+      }));
+
+      toast.success("Categoria criada com sucesso.");
+      resetCategoryForm();
+      setCategoryDialogOpen(false);
+    } catch (error) {
+      console.error("Erro ao criar categoria:", error);
+      toast.error("Não foi possível criar a categoria.");
+    } finally {
+      setCategorySaving(false);
+    }
+  }, [categories, categoryForm, resetCategoryForm]);
 
   const uploadProductImage = useCallback(
     async (file: File): Promise<string | null> => {
@@ -399,6 +514,17 @@ const Admin = () => {
       return;
     }
 
+    if (!productForm.categoryId) {
+      toast.error("Selecione uma categoria.");
+      return;
+    }
+
+    const selectedCategory = categories.find((category) => category.id === productForm.categoryId);
+    if (!selectedCategory) {
+      toast.error("Categoria selecionada não é válida.");
+      return;
+    }
+
     setProductSaving(true);
 
     try {
@@ -414,7 +540,8 @@ const Admin = () => {
 
       const payload = {
         name: productForm.name.trim(),
-        category: productForm.category,
+        category: selectedCategory.slug,
+        category_id: selectedCategory.id,
         base_price: parsedPrice,
         description: productForm.description.trim() || null,
         image_url: imageUrl,
@@ -440,7 +567,7 @@ const Admin = () => {
     } finally {
       setProductSaving(false);
     }
-  }, [productForm, productImageFile, loadAllProducts, resetProductForm, uploadProductImage]);
+  }, [categories, productForm, productImageFile, loadAllProducts, resetProductForm, uploadProductImage]);
 
   const handleDeleteProduct = useCallback(async () => {
     if (!productToDelete) return;
@@ -469,6 +596,14 @@ const Admin = () => {
     Object.values(groups).forEach((products) => products.sort((a, b) => a.name.localeCompare(b.name)));
     return groups;
   }, [allProducts]);
+
+  const categoryLabelMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    categories.forEach((category) => {
+      map[category.slug] = category.name;
+    });
+    return map;
+  }, [categories]);
 
   const loadOrders = useCallback(async () => {
     try {
@@ -800,8 +935,9 @@ const Admin = () => {
     if (isAdmin) {
       void loadAllProducts();
       void loadPromotions();
+      void loadCategories();
     }
-  }, [isAdmin, loadAllProducts, loadPromotions]);
+  }, [isAdmin, loadAllProducts, loadPromotions, loadCategories]);
 
   useEffect(() => {
     if (isAdmin && selectedMenuDate) {
@@ -814,6 +950,17 @@ const Admin = () => {
       setPromotionProductsSelection([]);
     }
   }, [promotionForm.appliesToAll, promotionProductsSelection.length]);
+
+  useEffect(() => {
+    if (categories.length > 0) {
+      const preferredCategory = categories.find((category) => category.slug === "eclair") ?? categories[0];
+      setProductForm((prev) => ({
+        ...prev,
+        categoryId: prev.categoryId || preferredCategory.id,
+        category: prev.category || preferredCategory.slug,
+      }));
+    }
+  }, [categories]);
 
   // Realtime subscription para atualizações automáticas
   useEffect(() => {
@@ -1248,14 +1395,14 @@ const Admin = () => {
     const term = productSearch.trim().toLowerCase();
     if (!term) return allProducts;
     return allProducts.filter((product) => {
-      const categoryLabel = PRODUCT_CATEGORY_LABELS[product.category] ?? product.category;
+      const categoryLabel = categoryLabelMap[product.category] ?? formatCategoryLabel(product.category);
       return (
         product.name.toLowerCase().includes(term) ||
         categoryLabel.toLowerCase().includes(term) ||
         product.category.toLowerCase().includes(term)
       );
     });
-  }, [allProducts, productSearch]);
+  }, [allProducts, categoryLabelMap, productSearch]);
 
   const renderOrdersTable = (
     ordersToRender: Order[],
@@ -1939,7 +2086,7 @@ const Admin = () => {
                       <div key={category} className="space-y-3">
                         <div className="flex items-center justify-between">
                           <h3 className="text-sm font-semibold text-foreground">
-                            {PRODUCT_CATEGORY_LABELS[category] ?? category}
+                            {categoryLabelMap[category] ?? formatCategoryLabel(category)}
                           </h3>
                           <span className="text-xs text-foreground/60">{products.length} produto(s)</span>
                         </div>
@@ -2131,7 +2278,7 @@ const Admin = () => {
                             </TableCell>
                             <TableCell>
                               <Badge variant="secondary">
-                                {PRODUCT_CATEGORY_LABELS[product.category] ?? product.category}
+                                {categoryLabelMap[product.category] ?? formatCategoryLabel(product.category)}
                               </Badge>
                             </TableCell>
                             <TableCell>{formatCurrency(product.base_price)}</TableCell>
@@ -2625,18 +2772,21 @@ const Admin = () => {
               <div className="grid gap-2">
                 <Label>Categoria</Label>
                 <Select
-                  value={productForm.category}
-                  onValueChange={(value) => handleProductInputChange("category", value)}
+                  value={productForm.categoryId || ""}
+                  onValueChange={handleProductCategoryChange}
+                  disabled={categories.length === 0}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecione uma categoria" />
+                    <SelectValue placeholder={categories.length === 0 ? "Nenhuma categoria disponível" : "Selecione uma categoria"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {PRODUCT_CATEGORIES.map((category) => (
-                      <SelectItem key={category.value} value={category.value}>
-                        {category.label}
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                        {category.is_natal ? " • Natal" : ""}
                       </SelectItem>
                     ))}
+                    <SelectItem value="__new__">+ Criar nova categoria</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -2703,6 +2853,72 @@ const Admin = () => {
             </Button>
             <Button onClick={handleSaveProduct} disabled={productSaving}>
               {productSaving ? "A guardar..." : productForm.id ? "Guardar alterações" : "Criar produto"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={categoryDialogOpen}
+        onOpenChange={(open) => {
+          setCategoryDialogOpen(open);
+          if (!open) {
+            resetCategoryForm();
+            setCategorySaving(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nova categoria</DialogTitle>
+            <DialogDescription className="text-foreground">
+              Crie categorias para organizar os produtos e controlar as encomendas especiais de Natal.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              <Label>Nome da categoria</Label>
+              <Input
+                placeholder="Ex: Tortas Chococlair"
+                value={categoryForm.name}
+                onChange={(event) => setCategoryForm((prev) => ({ ...prev, name: event.target.value }))}
+              />
+            </div>
+
+            <div className="flex items-start justify-between rounded-lg border bg-muted/40 px-4 py-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Categoria de Natal</p>
+                <p className="text-xs text-foreground/70 max-w-xs">
+                  Marque esta opção para aplicar automaticamente as regras de encomendas especiais (24/12, pagamento no dia, carrinho exclusivo).
+                </p>
+              </div>
+              <Switch
+                checked={categoryForm.isNatal}
+                onCheckedChange={(checked) => setCategoryForm((prev) => ({ ...prev, isNatal: checked }))}
+              />
+            </div>
+
+            {categoryForm.name.trim() && (
+              <p className="text-xs text-foreground/60">
+                Identificador interno: <span className="font-mono">{slugifyCategory(categoryForm.name)}</span>
+              </p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                resetCategoryForm();
+                setCategoryDialogOpen(false);
+              }}
+              disabled={categorySaving}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveCategory} disabled={categorySaving}>
+              {categorySaving ? "A criar..." : "Criar categoria"}
             </Button>
           </DialogFooter>
         </DialogContent>

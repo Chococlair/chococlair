@@ -9,6 +9,7 @@ interface ProductCardProps {
   id: string;
   name: string;
   category: string;
+  categoryLabel?: string;
   price: number;
   image?: string;
   description?: string;
@@ -29,27 +30,24 @@ export const ProductCard = ({
   promotion,
   availableToday,
   isNatal = false,
+  categoryLabel,
 }: ProductCardProps) => {
-  const getCategoryLabel = (cat: string) => {
-    const labels: Record<string, string> = {
-      eclair: "Éclair",
-      chocotone: "Doce de Natal",
-      rocambole: "Doce de Natal",
-      natal_doces: "Doce de Natal",
-      natal_tabuleiros: "Tabuleiro de Natal",
-    };
-    return labels[cat] || cat;
-  };
+  const normalizeLabel = (slug: string) =>
+    slug
+      .split("_")
+      .map((part) => (part.length === 0 ? part : part[0].toUpperCase() + part.slice(1)))
+      .join(" ");
 
-  const getCategoryColor = (cat: string) => {
-    const colors: Record<string, string> = {
-      eclair: "bg-primary",
-      chocotone: "bg-accent",
-      rocambole: "bg-secondary",
-      natal_doces: "bg-accent",
-      natal_tabuleiros: "bg-secondary",
-    };
-    return colors[cat] || "bg-muted";
+  const categoryBadgeLabel = categoryLabel ?? normalizeLabel(category);
+
+  const getCategoryClasses = (cat: string, natal: boolean) => {
+    if (cat === "eclair") {
+      return "bg-primary text-primary-foreground";
+    }
+    if (natal) {
+      return "bg-rose-500/10 text-rose-700 border border-rose-500/20";
+    }
+    return "bg-muted text-foreground/80";
   };
 
   const hasDiscount = discountedPrice !== undefined && discountedPrice < price;
@@ -85,8 +83,8 @@ export const ProductCard = ({
       
       <CardContent className="p-4">
         <div className="flex flex-wrap items-center gap-2 mb-2">
-          <Badge className={getCategoryColor(category)}>
-            {getCategoryLabel(category)}
+          <Badge className={getCategoryClasses(category, isNatal)}>
+            {categoryBadgeLabel}
           </Badge>
           {promotion && (
             <Badge variant="outline" className="text-primary border-primary/40">

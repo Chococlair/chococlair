@@ -46,7 +46,7 @@ WHERE category = 'eclair' AND image_url IS NULL;
 
 UPDATE products 
 SET image_url = 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=800&q=80&fit=crop' 
-WHERE category = 'chocotone' AND image_url IS NULL;
+WHERE category = 'chocotones' AND image_url IS NULL;
 
 -- ============================================
 -- ROCAMBOLES
@@ -54,7 +54,7 @@ WHERE category = 'chocotone' AND image_url IS NULL;
 
 UPDATE products 
 SET image_url = 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=800&q=80&fit=crop' 
-WHERE category = 'rocambole' AND image_url IS NULL;
+WHERE category = 'rocamboles' AND image_url IS NULL;
 
 -- ============================================
 -- VERIFICAR RESULTADOS

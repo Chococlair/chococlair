@@ -44,7 +44,7 @@ const Carrinho = () => {
       setCart(items);
       setCartCount(getCartItemsCount(items));
       setPricing(calculateCartPricing(items, promos));
-      setIsNatalCart(items.length > 0 && items.every((item) => isNatalCategory(item.category)));
+    setIsNatalCart(items.length > 0 && items.every((item) => item.isNatal ?? isNatalCategory(item.category)));
     },
     [promotions],
   );
@@ -149,7 +149,7 @@ const Carrinho = () => {
       }
     }
     
-    if (item.category === 'rocambole' && item.options?.massType) {
+    if ((item.category === 'rocamboles' || item.category === 'rocambole') && item.options?.massType) {
       const massLabel = item.options.massType === 'chocolate' ? 'Massa de Chocolate' : 'Massa Branca';
       parts.push(massLabel);
     }

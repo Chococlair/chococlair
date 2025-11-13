@@ -31,13 +31,13 @@ INSERT INTO products (name, category, base_price, description, available) VALUES
 
 -- Criar chocotones de exemplo
 INSERT INTO products (name, category, base_price, description, available) VALUES
-('Chocotone Tradicional', 'chocotone', 15.00, 'Chocotone recheado com gotas de chocolate', true),
-('Chocotone Especial', 'chocotone', 18.00, 'Chocotone recheado com frutas cristalizadas', true);
+('Chocotone Tradicional', 'chocotones', 15.00, 'Chocotone recheado com gotas de chocolate', true),
+('Chocotone Especial', 'chocotones', 18.00, 'Chocotone recheado com frutas cristalizadas', true);
 
 -- Criar rocamboles de exemplo
 INSERT INTO products (name, category, base_price, description, available) VALUES
-('Rocambole Chocolate', 'rocambole', 12.00, 'Rocambole com massa de chocolate', true),
-('Rocambole Branca', 'rocambole', 12.00, 'Rocambole com massa branca', true);
+('Rocambole Chocolate', 'rocamboles', 12.00, 'Rocambole com massa de chocolate', true),
+('Rocambole Branca', 'rocamboles', 12.00, 'Rocambole com massa branca', true);
 ```
 
 ### PASSO 3: Verificar se os produtos foram criados
