@@ -2226,7 +2226,7 @@ const Admin = () => {
                     placeholder="Pesquisar por nome ou categoria"
                     value={productSearch}
                     onChange={(event) => setProductSearch(event.target.value)}
-                    className="md:w-72"
+                    className="md:w-72 placeholder:text-foreground/60"
                   />
                   <span className="text-sm text-foreground/70">
                     A mostrar {filteredProductsList.length} de {allProducts.length} produtos
