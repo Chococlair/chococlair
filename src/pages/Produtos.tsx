@@ -33,6 +33,13 @@ interface ProductView extends Product {
   natalSectionKey?: string | null;
 }
 
+interface ProductCategory {
+  id: string;
+  name: string;
+  slug: string;
+  is_natal: boolean;
+}
+
 const formatCategoryLabel = (slug: string) =>
   slug
     .split("_")
@@ -86,6 +93,7 @@ const Produtos = () => {
   const [products, setProducts] = useState<ProductView[]>([]);
   const [loading, setLoading] = useState(true);
   const [cartCount, setCartCount] = useState(0);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
 
   const loadProducts = useCallback(async () => {
     try {
@@ -94,6 +102,7 @@ const Produtos = () => {
         { data: productsData, error: productsError },
         { data: promotionsData, error: promotionsError },
         { data: availabilityData, error: availabilityError },
+        { data: categoriesData, error: categoriesError },
       ] = await Promise.all([
         supabase
           .from<Product>('products')
@@ -113,14 +122,21 @@ const Produtos = () => {
           .select('product_id')
           .eq('available_date', today)
           .eq('is_active', true),
+        supabase
+          .from<ProductCategory>('product_categories')
+          .select('id, name, slug, is_natal')
+          .order('is_natal', { ascending: true })
+          .order('name', { ascending: true }),
       ]);
 
       if (productsError) throw productsError;
       if (promotionsError) throw promotionsError;
       if (availabilityError) throw availabilityError;
+      if (categoriesError) throw categoriesError;
 
       const activePromotions = getActivePromotions((promotionsData ?? []) as PromotionRecord[]);
       const availabilitySet = new Set((availabilityData ?? []).map(({ product_id }) => product_id));
+      setCategories(categoriesData ?? []);
 
       const enrichedProducts: ProductView[] = (productsData ?? []).map((product) => {
         const basePrice = Number(product.base_price);
@@ -205,6 +221,16 @@ const Produtos = () => {
     return groups;
   }, [products]);
 
+  const nonNatalCategories = useMemo(
+    () => categories.filter((category) => !category.is_natal),
+    [categories],
+  );
+
+  const natalCategories = useMemo(
+    () => categories.filter((category) => category.is_natal),
+    [categories],
+  );
+
   const orderedNatalSections = useMemo(() => {
     const keys = Object.keys(natalGroups);
     if (keys.length === 0) return [];
@@ -243,10 +269,16 @@ const Produtos = () => {
             </div>
           ) : (
             <Tabs defaultValue="todos" className="w-full">
-              <TabsList className="grid w-full max-w-md mx-auto grid-cols-3 mb-8">
+              <TabsList className="flex flex-wrap justify-center gap-2 mb-8">
                 <TabsTrigger value="todos">Todos</TabsTrigger>
-                <TabsTrigger value="eclair">Éclairs</TabsTrigger>
-                <TabsTrigger value="natal">Natal</TabsTrigger>
+                {nonNatalCategories.map((category) => (
+                  <TabsTrigger key={category.id} value={category.slug}>
+                    {category.name}
+                  </TabsTrigger>
+                ))}
+                {natalCategories.length > 0 && (
+                  <TabsTrigger value="natal">Natal</TabsTrigger>
+                )}
               </TabsList>
 
               <TabsContent value="todos" className="mt-8">
@@ -270,32 +302,36 @@ const Produtos = () => {
                 </div>
               </TabsContent>
 
-              <TabsContent value="eclair" className="mt-8">
-                <div className="mb-6 p-4 bg-primary/5 rounded-lg">
-                  <p className="text-sm text-foreground/80">
-                    <strong>Nota:</strong> Os éclairs são vendidos em caixas de 2, 3 ou 6 unidades. 
-                    Preço por unidade: 3,50€
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                  {getProductsByCategory('eclair').map(product => (
-                    <ProductCard
-                      key={product.id}
-                      id={product.id}
-                      name={product.name}
-                      category={product.category}
-                      categoryLabel={product.categoryName}
-                      price={Number(product.base_price)}
-                      discountedPrice={product.discountedPrice}
-                      promotion={product.appliedPromotion || undefined}
-                      image={product.image_url || undefined}
-                      description={product.description || undefined}
-                      availableToday={product.availableToday}
-                      isNatal={product.isNatal}
-                    />
-                  ))}
-                </div>
-              </TabsContent>
+              {nonNatalCategories.map((category) => (
+                <TabsContent key={category.id} value={category.slug} className="mt-8">
+                  {category.slug === 'eclair' && (
+                    <div className="mb-6 p-4 bg-primary/5 rounded-lg">
+                      <p className="text-sm text-foreground/80">
+                        <strong>Nota:</strong> Os éclairs são vendidos em caixas de 2, 3 ou 6 unidades.
+                        Preço por unidade: 3,50€
+                      </p>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {getProductsByCategory(category.slug).map((product) => (
+                      <ProductCard
+                        key={product.id}
+                        id={product.id}
+                        name={product.name}
+                        category={product.category}
+                        categoryLabel={product.categoryName}
+                        price={Number(product.base_price)}
+                        discountedPrice={product.discountedPrice}
+                        promotion={product.appliedPromotion || undefined}
+                        image={product.image_url || undefined}
+                        description={product.description || undefined}
+                        availableToday={product.availableToday}
+                        isNatal={product.isNatal}
+                      />
+                    ))}
+                  </div>
+                </TabsContent>
+              ))}
 
               <TabsContent value="natal" className="mt-8 space-y-10">
                 {orderedNatalSections.length === 0 ? (

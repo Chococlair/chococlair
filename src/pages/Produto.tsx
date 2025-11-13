@@ -57,6 +57,8 @@ const Produto = () => {
   const navigate = useNavigate();
   const [product, setProduct] = useState<Product | null>(null);
   const [allEclairs, setAllEclairs] = useState<Product[]>([]);
+  const [loadingEclairFlavors, setLoadingEclairFlavors] = useState(false);
+  const [availableEclairIds, setAvailableEclairIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [cartCount, setCartCount] = useState(0);
   const [quantity, setQuantity] = useState(1);
@@ -68,18 +70,49 @@ const Produto = () => {
   const [isNatalProduct, setIsNatalProduct] = useState(false);
 
   const loadAllEclairs = useCallback(async () => {
+    setLoadingEclairFlavors(true);
     try {
+      const today = getTodayDateString();
       const { data, error } = await supabase
-        .from<Product>('products')
-        .select('*')
-        .eq('category', 'eclair')
-        .eq('available', true)
-        .order('name', { ascending: true });
+        .from('daily_product_availability')
+        .select(
+          `
+          product_id,
+          products!inner (
+            id,
+            name,
+            category,
+            base_price,
+            description,
+            image_url,
+            available
+          )
+        `,
+        )
+        .eq('available_date', today)
+        .eq('is_active', true)
+        .eq('products.category', 'eclair')
+        .eq('products.available', true)
+        .order('products(name)', { ascending: true });
 
       if (error) throw error;
-      setAllEclairs(data ?? []);
+
+      const flavors =
+        data?.map((entry) => entry.products as Product).filter((product) => Boolean(product?.id)) ?? [];
+
+      if (flavors.length === 0) {
+        toast.warning('Nenhum sabor de éclair foi marcado como disponível hoje.');
+      }
+
+      setAllEclairs(flavors);
+      setAvailableEclairIds(new Set(flavors.map((flavor) => flavor.id)));
     } catch (error: unknown) {
-      console.error('Erro ao carregar éclairs:', error);
+      console.error('Erro ao carregar éclairs disponíveis hoje:', error);
+      toast.error('Não foi possível carregar os sabores de éclair disponíveis para hoje.');
+      setAllEclairs([]);
+      setAvailableEclairIds(new Set());
+    } finally {
+      setLoadingEclairFlavors(false);
     }
   }, []);
 
@@ -155,7 +188,22 @@ const Produto = () => {
     }
   }, [boxSize, product?.category]);
 
+  // Garantir que sabores selecionados continuem válidos após filtrar os disponíveis
+  useEffect(() => {
+    if (product?.category === 'eclair') {
+      setSelectedFlavors((prev) =>
+        prev.filter((flavorId) => availableEclairIds.has(flavorId)),
+      );
+    }
+  }, [availableEclairIds, product?.category]);
+
   const handleFlavorAdd = (flavorId: string) => {
+    const flavorAvailable = availableEclairIds.has(flavorId);
+    if (!flavorAvailable) {
+      toast.error('Este sabor não está disponível hoje.');
+      return;
+    }
+
     const size = Number(boxSize);
     if (selectedFlavors.length < size) {
       setSelectedFlavors([...selectedFlavors, flavorId]);
@@ -375,10 +423,16 @@ const Produto = () => {
                       Escolha os Sabores ({selectedFlavors.length}/{boxSize} selecionados)
                     </Label>
                     <div className="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-4">
-                      {allEclairs.length === 0 ? (
+                      {loadingEclairFlavors ? (
                         <p className="text-sm text-foreground/70">A carregar sabores...</p>
+                      ) : availableEclairIds.size === 0 ? (
+                        <p className="text-sm text-foreground/70">
+                          Nenhum sabor de éclair está disponível hoje. Consulte o menu diário ou escolha outra categoria.
+                        </p>
                       ) : (
-                        allEclairs.map((eclair) => {
+                        allEclairs
+                          .filter((eclair) => availableEclairIds.has(eclair.id))
+                          .map((eclair) => {
                           // Contar quantas vezes este sabor está selecionado
                           const count = selectedFlavors.filter(id => id === eclair.id).length;
                           const canAdd = selectedFlavors.length < Number(boxSize);
